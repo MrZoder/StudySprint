@@ -13,7 +13,9 @@ export interface PlannerContextValue {
     dueDate: string;
     priority: Assignment["priority"];
     notes?: string;
-  }) => void;
+    /** Optional seed subtasks (titles). Falls back to defaults when omitted. */
+    subtasks?: string[];
+  }) => string;
   updateAssignment: (
     id: string,
     assignment: Partial<Omit<Assignment, "id" | "subtasks" | "progress" | "status">> & {

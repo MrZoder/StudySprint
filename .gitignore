@@ -12,6 +12,9 @@ dist
 dist-ssr
 *.local
 
+# Local temp scratch
+.commit-msg.tmp
+
 # Raw/working screenshot files at repo root (curated copies live in /screenshots)
 /DashboardPage*.png
 /AssignmentsPage*.png

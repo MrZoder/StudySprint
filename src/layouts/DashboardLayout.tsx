@@ -11,6 +11,7 @@ import { usePlanner } from '../context/usePlanner';
 const routeTitleMap: Record<string, string> = {
   '/dashboard': 'Dashboard',
   '/assignments': 'Assignments',
+  '/ai-planner': 'AI planner',
   '/calendar': 'Calendar',
   '/subjects': 'Subjects',
   '/settings': 'Settings',

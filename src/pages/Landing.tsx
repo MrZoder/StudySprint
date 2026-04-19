@@ -28,6 +28,10 @@ import {
   LineChart,
   Moon,
   Sun,
+  Wand2,
+  FileText,
+  Layers,
+  Lightbulb,
 } from 'lucide-react';
 import { useTheme } from '../context/useTheme';
 
@@ -48,6 +52,7 @@ export default function Landing() {
       <main>
         <Hero />
         <TrustStrip />
+        <AIPlannerSpotlight />
         <Features />
         <WhyStudySprint />
         <HowItWorks />
@@ -81,11 +86,11 @@ function NavBar({ theme, toggleTheme }: { theme: string; toggleTheme: () => void
         </Link>
 
         <nav className="hidden items-center gap-7 text-sm font-medium text-gray-600 md:flex dark:text-slate-300">
+          <a href="#ai-planner" className="hover:text-gray-900 dark:hover:text-white">AI planner</a>
           <a href="#features" className="hover:text-gray-900 dark:hover:text-white">Features</a>
           <a href="#why" className="hover:text-gray-900 dark:hover:text-white">Why StudySprint</a>
           <a href="#how" className="hover:text-gray-900 dark:hover:text-white">How it works</a>
           <a href="#showcase" className="hover:text-gray-900 dark:hover:text-white">Product</a>
-          <a href="#team" className="hover:text-gray-900 dark:hover:text-white">Team</a>
         </nav>
 
         <div className="flex items-center gap-1.5 sm:gap-2">
@@ -389,6 +394,238 @@ function MockAssignment({
   );
 }
 
+/* ----------------------------------------------- AI PLANNER SPOTLIGHT */
+
+function AIPlannerSpotlight() {
+  const beats = [
+    {
+      icon: Brain,
+      title: 'Understand the brief',
+      desc: 'A plain-language summary that strips out the jargon and tells you what the assignment is actually asking for.',
+    },
+    {
+      icon: ListChecks,
+      title: 'Pull out the requirements',
+      desc: 'Deliverables, word counts, references, rubric signals — extracted into a checklist you can act on.',
+    },
+    {
+      icon: Layers,
+      title: 'A staged action plan',
+      desc: 'A realistic sequence of steps from first read to final submission, editable before you save it.',
+    },
+    {
+      icon: CalendarDays,
+      title: 'Pacing across the weeks',
+      desc: 'A suggested timeline that spreads the work between now and the due date, not the night before.',
+    },
+    {
+      icon: Lightbulb,
+      title: 'High-mark focus nudges',
+      desc: 'Quality-oriented reminders — rubric mapping, evidence checks, final polish — based on what strong students do.',
+    },
+    {
+      icon: ShieldCheck,
+      title: 'Academic-integrity first',
+      desc: 'Planning help only. The thinking, writing, and final academic decisions stay with the student — by design.',
+    },
+  ];
+
+  return (
+    <section
+      id="ai-planner"
+      className="relative overflow-hidden py-16 sm:py-24"
+    >
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-0 -z-10 bg-[radial-gradient(circle_at_15%_25%,rgba(139,92,246,0.14),transparent_55%),radial-gradient(circle_at_85%_75%,rgba(34,211,238,0.12),transparent_55%)]"
+      />
+
+      <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+        <div className="mx-auto max-w-3xl text-center">
+          <span className="inline-flex items-center gap-1.5 rounded-full border border-violet-200 bg-white/80 px-3 py-1 text-xs font-bold uppercase tracking-wider text-violet-700 backdrop-blur dark:border-violet-800/70 dark:bg-violet-950/40 dark:text-violet-200">
+            <Wand2 size={13} />
+            AI planner
+          </span>
+          <h2 className="mt-4 text-3xl font-bold tracking-tight text-gray-900 sm:text-4xl lg:text-[44px] dark:text-white">
+            Turn a dense assignment brief into a{' '}
+            <span className="bg-gradient-to-r from-violet-600 via-fuchsia-500 to-cyan-500 bg-clip-text text-transparent">
+              plan you can actually start.
+            </span>
+          </h2>
+          <p className="mt-4 text-base leading-relaxed text-gray-600 sm:text-lg dark:text-slate-400">
+            Drop in your brief. In seconds, StudySprint surfaces the summary, the requirements,
+            a staged plan, and a realistic pacing window — and turns any of it into real
+            subtasks inside your planner.
+          </p>
+          <div className="mt-7 flex flex-wrap items-center justify-center gap-3">
+            <Link
+              to="/ai-planner"
+              className="group inline-flex items-center gap-2 rounded-full bg-gradient-to-br from-violet-600 via-fuchsia-500 to-cyan-500 px-6 py-3.5 text-sm font-semibold text-white shadow-lg shadow-violet-500/30 transition-all hover:shadow-xl hover:shadow-violet-500/40"
+            >
+              Try the AI planner
+              <ArrowRight size={16} className="transition-transform group-hover:translate-x-0.5" />
+            </Link>
+            <a
+              href="#ai-planner-demo"
+              className="inline-flex items-center gap-2 rounded-full border border-gray-200 bg-white/90 px-6 py-3.5 text-sm font-semibold text-gray-700 shadow-sm transition-colors hover:border-gray-300 hover:bg-white dark:border-slate-800 dark:bg-[#070f1f] dark:text-slate-100 dark:hover:bg-slate-900/85"
+            >
+              See how it works
+            </a>
+          </div>
+        </div>
+
+        <div id="ai-planner-demo" className="mt-16 grid items-start gap-10 lg:grid-cols-[1.15fr_1fr] lg:gap-14">
+          <AIPlannerMock />
+
+          <ul className="space-y-4">
+            {beats.map((b) => (
+              <li
+                key={b.title}
+                className="group flex items-start gap-4 rounded-2xl border border-gray-200/80 bg-white/95 p-4 shadow-sm transition-all hover:-translate-y-0.5 hover:border-violet-300 hover:shadow-lg dark:border-slate-800 dark:bg-[#060e1e]/90 dark:hover:border-violet-700/70"
+              >
+                <span className="inline-flex size-11 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-violet-500/15 to-cyan-500/15 text-violet-600 ring-1 ring-violet-200/70 dark:text-violet-200 dark:ring-violet-800/60">
+                  <b.icon size={19} />
+                </span>
+                <div className="min-w-0">
+                  <h3 className="text-[15px] font-bold tracking-tight text-gray-900 dark:text-white">
+                    {b.title}
+                  </h3>
+                  <p className="mt-1 text-[13.5px] leading-relaxed text-gray-600 dark:text-slate-400">
+                    {b.desc}
+                  </p>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function AIPlannerMock() {
+  return (
+    <div className="relative">
+      <div
+        aria-hidden
+        className="absolute -inset-6 rounded-[36px] bg-gradient-to-br from-violet-500/20 via-fuchsia-400/15 to-cyan-400/15 blur-3xl"
+      />
+      <div className="relative rounded-2xl border border-white/80 bg-white/95 p-4 shadow-2xl shadow-violet-900/10 backdrop-blur-sm sm:p-5 dark:border-slate-800 dark:bg-[#030b1a]/95 dark:shadow-[0_50px_100px_-40px_rgba(124,58,237,0.55)]">
+        <div className="mb-3 flex items-center gap-1.5 px-1">
+          <span className="size-2.5 rounded-full bg-rose-400/80" />
+          <span className="size-2.5 rounded-full bg-amber-400/80" />
+          <span className="size-2.5 rounded-full bg-emerald-400/80" />
+          <div className="ml-3 rounded-md bg-gray-100 px-3 py-1 text-[11px] font-medium text-gray-500 dark:bg-slate-900 dark:text-slate-400">
+            studysprint.app / ai-planner
+          </div>
+        </div>
+
+        {/* Brief chip */}
+        <div className="rounded-xl border border-violet-200/70 bg-gradient-to-br from-violet-50/80 via-white to-cyan-50/50 p-4 dark:border-violet-900/40 dark:from-violet-950/25 dark:via-[#060e1e] dark:to-cyan-950/20">
+          <div className="flex items-center gap-2 text-[11px] font-semibold text-violet-700 dark:text-violet-300">
+            <FileText size={13} />
+            Your brief
+          </div>
+          <p className="mt-2 line-clamp-3 text-[12px] leading-relaxed text-gray-700 dark:text-slate-300">
+            Assignment Title: Software Engineering Group Report — Design Proposal. 2,500 words,
+            6 IEEE references, submission via Turnitin. Due 15 November. A 10-minute group
+            presentation in week 11…
+          </p>
+        </div>
+
+        {/* Output rows */}
+        <div className="mt-3 grid gap-3 sm:grid-cols-2">
+          <div className="rounded-xl border border-gray-200 bg-white p-3 shadow-sm dark:border-slate-800 dark:bg-[#050d1b]/80">
+            <div className="flex items-center gap-1.5 text-[10.5px] font-semibold uppercase tracking-wider text-violet-700 dark:text-violet-300">
+              <Brain size={11} />
+              Summary
+            </div>
+            <p className="mt-1.5 text-[11.5px] leading-snug text-gray-600 dark:text-slate-400">
+              You'll produce a written report and presentation, backed by 6 credible sources
+              and marked against a rubric.
+            </p>
+          </div>
+          <div className="rounded-xl border border-gray-200 bg-white p-3 shadow-sm dark:border-slate-800 dark:bg-[#050d1b]/80">
+            <div className="flex items-center gap-1.5 text-[10.5px] font-semibold uppercase tracking-wider text-cyan-700 dark:text-cyan-300">
+              <ListChecks size={11} />
+              Requires
+            </div>
+            <div className="mt-1.5 flex flex-wrap gap-1">
+              {['2,500 words', 'IEEE refs', 'Rubric', 'Group'].map((t) => (
+                <span
+                  key={t}
+                  className="rounded-full bg-cyan-100 px-2 py-0.5 text-[9.5px] font-semibold text-cyan-700 dark:bg-cyan-900/40 dark:text-cyan-200"
+                >
+                  {t}
+                </span>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {/* Action plan */}
+        <div className="mt-3 rounded-xl border border-emerald-200/70 bg-emerald-50/50 p-3 dark:border-emerald-900/40 dark:bg-emerald-950/15">
+          <div className="flex items-center gap-1.5 text-[10.5px] font-semibold uppercase tracking-wider text-emerald-700 dark:text-emerald-300">
+            <Layers size={11} />
+            Action plan (5 of 8 stages)
+          </div>
+          <ul className="mt-2 space-y-1.5">
+            {[
+              'Understand the brief',
+              'Map the rubric',
+              'Gather credible sources',
+              'Draft section by section',
+              'Rubric self-check before submit',
+            ].map((t, i) => (
+              <li key={t} className="flex items-center gap-2">
+                <span
+                  className={`inline-flex size-4 items-center justify-center rounded-sm border text-[9px] ${
+                    i < 2
+                      ? 'border-emerald-500 bg-emerald-500 text-white'
+                      : 'border-emerald-300 bg-white dark:border-emerald-700 dark:bg-slate-900'
+                  }`}
+                >
+                  {i < 2 ? <CheckCircle2 size={9} /> : ''}
+                </span>
+                <span className="text-[11.5px] text-gray-800 dark:text-slate-200">{t}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+
+        {/* Timeline */}
+        <div className="mt-3 grid grid-cols-5 gap-1.5">
+          {[
+            { label: 'Plan', tone: 'from-violet-500 to-violet-600' },
+            { label: 'Research', tone: 'from-fuchsia-500 to-fuchsia-600' },
+            { label: 'Draft', tone: 'from-blue-500 to-blue-600' },
+            { label: 'Refine', tone: 'from-cyan-500 to-cyan-600' },
+            { label: 'Submit', tone: 'from-emerald-500 to-emerald-600' },
+          ].map((p) => (
+            <div
+              key={p.label}
+              className="rounded-md border border-gray-200 bg-white p-1.5 text-center shadow-sm dark:border-slate-800 dark:bg-[#050d1b]"
+            >
+              <div className={`mx-auto h-1 w-6 rounded-full bg-gradient-to-r ${p.tone}`} />
+              <div className="mt-1 text-[9.5px] font-semibold text-gray-700 dark:text-slate-300">
+                {p.label}
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <Link
+          to="/ai-planner"
+          className="mt-3 flex items-center justify-center gap-1.5 rounded-xl bg-gradient-to-br from-violet-600 via-fuchsia-500 to-cyan-500 px-3 py-2.5 text-[12px] font-semibold text-white shadow-md shadow-violet-500/30 transition-all hover:shadow-lg"
+        >
+          Convert to a StudySprint assignment
+          <ArrowRight size={13} />
+        </Link>
+      </div>
+    </div>
+  );
+}
+
 /* ------------------------------------------------------- TRUST STRIP */
 
 function TrustStrip() {
@@ -419,6 +656,31 @@ function TrustStrip() {
 
 function Features() {
   const features = [
+    {
+      icon: Wand2,
+      title: 'AI brief breakdown',
+      desc: 'Paste any assignment brief and StudySprint turns it into a plain-language summary, a requirements checklist, and a staged action plan you can save with one click.',
+      accent: 'violet',
+      preview: (
+        <div className="space-y-1.5">
+          <div className="flex items-center justify-between rounded-md bg-violet-50 px-2 py-1.5 dark:bg-violet-950/40">
+            <span className="text-[10px] font-semibold text-violet-800 dark:text-violet-200">Brief</span>
+            <span className="text-[10px] font-bold text-violet-900 dark:text-violet-100">→ plan</span>
+          </div>
+          {[
+            'Understand the brief',
+            'Map the rubric',
+            'Gather credible sources',
+            'Draft section by section',
+          ].map((t) => (
+            <div key={t} className="flex items-center gap-1.5">
+              <span className="inline-flex size-3 items-center justify-center rounded-sm border border-violet-400 bg-white dark:border-violet-600 dark:bg-slate-800" />
+              <span className="text-[10px] text-gray-700 dark:text-slate-300">{t}</span>
+            </div>
+          ))}
+        </div>
+      ),
+    },
     {
       icon: LayoutDashboard,
       title: 'Dashboard overview',

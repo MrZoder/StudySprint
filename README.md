@@ -48,6 +48,17 @@ The product is scoped as a realistic MVP — small enough to be maintained by a 
 
 ## Features
 
+### AI Brief Breakdown — the planning assistant
+- A dedicated "brief-to-plan" workspace at `/ai-planner`.
+- Paste or drop in an assignment brief and StudySprint returns:
+  - a plain-language **summary** of what the task is really asking,
+  - a **requirements checklist** (deliverables, word counts, references, rubric, submission format),
+  - a **staged action plan** (understand the brief → map the rubric → research → draft → refine → rubric self-check → submit),
+  - a **suggested timeline** across Discover → Research → Draft → Refine → Polish phases between now and the due date,
+  - **high-mark focus tips** tailored to the deliverable type.
+- The generated plan is fully editable — stages can be toggled, subtasks tweaked — and can be **converted into a real StudySprint assignment with subtasks** in one click.
+- The assist runs fully on-device (no network calls, no data leaves the browser) and is scoped as a *planning* aid only — an explicit ethical safeguard clarifies that thinking, writing, and academic decisions stay with the student.
+
 ### Dashboard
 - Hero summary with live counts of due-soon, overdue, and completed work.
 - Stat cards, "Needs Attention", "Due Soon", "Weekly Progress", and "Up Next" panels.
@@ -134,6 +145,7 @@ The product is scoped as a realistic MVP — small enough to be maintained by a 
 | Dates | **date-fns** |
 | State | React Context (`PlannerContext`, `ThemeContext`, `ToastContext`) |
 | Persistence | `localStorage` (Supabase-ready architecture) |
+| AI Planner | Local heuristic engine (`src/lib/briefAnalyzer.ts`) — runs fully on-device |
 | Lint / Format | ESLint 9 + typescript-eslint |
 
 The codebase is intentionally lean: no Redux, no server framework, no premature abstraction — just a clean component-based architecture a small team can maintain.
@@ -149,10 +161,10 @@ src/
 ├── index.css            # Tailwind + theme tokens
 ├── layouts/             # DashboardLayout (sidebar, topbar, bottom nav)
 ├── pages/               # Landing, Dashboard, Subjects, Assignments,
-│                        # AssignmentDetail, Calendar, Settings
+│                        # AssignmentDetail, Calendar, Settings, AIPlanner
 ├── components/          # Reusable UI (cards, badges, modals, forms…)
 ├── context/             # PlannerContext, ThemeContext, ToastContext
-├── lib/                 # Date / progress / priority helpers
+├── lib/                 # Date / progress / priority helpers + briefAnalyzer
 └── types/               # Shared TypeScript types
 ```
 
@@ -199,9 +211,11 @@ The product positioning is deliberately *not* a generic to-do list — it is a *
 
 ## Roadmap
 
-Current build is a polished **frontend MVP**. Planned next steps:
+Current build is a polished **frontend MVP** with an on-device AI planning assist. Planned next steps:
 
 - **Backend & Auth** — Supabase integration for user accounts and multi-device sync.
+- **Optional LLM upgrade for the AI Planner** — swap the local heuristic engine for a hosted model (with a user-supplied API key) for richer briefs / PDFs.
+- **PDF / DOCX ingestion** — parse uploaded assignment PDFs directly instead of requiring plain-text paste.
 - **Real reminder engine** — scheduled email / push notifications, not just in-app banners.
 - **Richer subtask editing** — edit text, delete, and reorder.
 - **Confirmation & undo UX** — safer destructive actions with toast-based undo.

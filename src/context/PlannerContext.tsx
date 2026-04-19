@@ -60,17 +60,26 @@ export function PlannerProvider({ children }: { children: ReactNode }) {
         setAssignments((prev) => prev.filter((assignment) => assignment.subjectId !== id));
       },
       addAssignment: (assignment) => {
+        const id = crypto.randomUUID();
+        const seedSubtaskTitles =
+          assignment.subtasks && assignment.subtasks.length > 0
+            ? assignment.subtasks
+            : ["Plan your approach", "Start first draft"];
+        const { subtasks: _ignoredSeed, ...rest } = assignment;
+        void _ignoredSeed;
         const newAssignment: Assignment = {
-          id: crypto.randomUUID(),
-          ...assignment,
+          id,
+          ...rest,
           progress: 0,
           status: "Not Started",
-          subtasks: [
-            { id: crypto.randomUUID(), title: "Plan your approach", isCompleted: false },
-            { id: crypto.randomUUID(), title: "Start first draft", isCompleted: false },
-          ],
+          subtasks: seedSubtaskTitles.map((title) => ({
+            id: crypto.randomUUID(),
+            title,
+            isCompleted: false,
+          })),
         };
         setAssignments((prev) => withDerivedValues([newAssignment, ...prev]));
+        return id;
       },
       deleteAssignment: (id) => {
         setAssignments((prev) => prev.filter((assignment) => assignment.id !== id));

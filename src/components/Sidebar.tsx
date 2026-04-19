@@ -10,6 +10,7 @@ import {
   Plus,
   Flame,
   Sparkles,
+  Wand2,
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { ANNOTATION_CAPTURE_MODE, annotate } from '../lib/annotationCapture';
@@ -23,6 +24,8 @@ type NavItem = {
   path: string;
   /** Optional short descriptor shown under the label on hover/expanded states. */
   hint?: string;
+  /** Optional pill rendered beside the label (e.g. "New", "AI"). */
+  pill?: { label: string; tone: 'violet' | 'blue' };
 };
 
 type NavGroup = {
@@ -35,6 +38,13 @@ const navGroups: NavGroup[] = [
     label: 'Plan',
     items: [
       { icon: LayoutDashboard, label: 'Dashboard', path: '/dashboard', hint: 'Week at a glance' },
+      {
+        icon: Wand2,
+        label: 'AI planner',
+        path: '/ai-planner',
+        hint: 'Brief → plan',
+        pill: { label: 'New', tone: 'violet' },
+      },
       { icon: CalendarDays, label: 'Calendar', path: '/calendar', hint: 'Planner view' },
     ],
   },
@@ -216,6 +226,19 @@ export default function Sidebar({ onClose }: { onClose?: () => void }) {
                             )}
                           >
                             {dueSoonCount}
+                          </span>
+                        )}
+                        {item.pill && (
+                          <span
+                            className={cn(
+                              'inline-flex shrink-0 items-center gap-1 rounded-full px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-[0.14em] shadow-sm',
+                              item.pill.tone === 'violet'
+                                ? 'bg-gradient-to-br from-violet-500 via-fuchsia-500 to-cyan-500 text-white'
+                                : 'bg-blue-500 text-white',
+                            )}
+                          >
+                            <Sparkles size={9} />
+                            {item.pill.label}
                           </span>
                         )}
                       </>
