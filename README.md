@@ -1,5 +1,5 @@
 # StudySprint
-
+https://thestudysprint.netlify.app/
 > A modern, calm, and focused study planner that helps university students beat deadlines, break assignments down into achievable tasks, and stay organised across every subject — in one clean interface.
 
 <p align="center">
