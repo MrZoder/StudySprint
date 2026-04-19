@@ -1,0 +1,139 @@
+@import "tailwindcss";
+@custom-variant dark (&:where(.dark, .dark *));
+
+:root {
+  font-family: Inter, system-ui, Avenir, Helvetica, Arial, sans-serif;
+  line-height: 1.5;
+  font-weight: 400;
+  color: #111827;
+  background-color: #f8fafc;
+  color-scheme: light;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+  background:
+    radial-gradient(circle at 14% 10%, rgba(59, 130, 246, 0.1), transparent 38%),
+    radial-gradient(circle at 88% 4%, rgba(14, 116, 144, 0.08), transparent 28%),
+    linear-gradient(180deg, #f8fafc 0%, #eef2f7 100%);
+  color: #111827;
+}
+
+.dark body {
+  color-scheme: dark;
+  background:
+    radial-gradient(circle at 16% 2%, rgba(37, 99, 235, 0.3), transparent 30%),
+    radial-gradient(circle at 88% 0%, rgba(8, 145, 178, 0.16), transparent 28%),
+    radial-gradient(circle at 54% 120%, rgba(51, 65, 85, 0.24), transparent 45%),
+    linear-gradient(180deg, #030712 0%, #020617 40%, #000814 100%);
+  color: #f3f4f6;
+}
+
+::selection {
+  background-color: rgba(59, 130, 246, 0.24);
+}
+
+.dark ::selection {
+  background-color: rgba(56, 189, 248, 0.34);
+}
+
+#root {
+  width: 100%;
+  min-height: 100vh;
+  min-height: 100dvh;
+}
+
+/* ---------- Soft card design tokens ---------- */
+
+@layer components {
+  .soft-card {
+    border-radius: 1rem;
+    border: 1px solid rgba(226, 232, 240, 0.85);
+    background-color: rgba(255, 255, 255, 0.92);
+    box-shadow:
+      0 1px 2px rgba(15, 23, 42, 0.04),
+      0 8px 24px -16px rgba(15, 23, 42, 0.08);
+    backdrop-filter: blur(6px);
+    transition: border-color 0.25s ease, box-shadow 0.25s ease, transform 0.25s ease;
+  }
+  .soft-card:hover {
+    border-color: rgba(191, 219, 254, 0.9);
+    box-shadow:
+      0 1px 2px rgba(15, 23, 42, 0.05),
+      0 18px 40px -22px rgba(59, 130, 246, 0.25);
+  }
+  .dark .soft-card {
+    border-color: rgba(30, 41, 59, 0.85);
+    background-color: rgba(5, 13, 27, 0.72);
+    box-shadow:
+      0 1px 2px rgba(2, 6, 23, 0.5),
+      0 20px 40px -22px rgba(2, 6, 23, 0.8);
+  }
+  .dark .soft-card:hover {
+    border-color: rgba(30, 58, 138, 0.6);
+    box-shadow:
+      0 1px 2px rgba(2, 6, 23, 0.5),
+      0 24px 48px -22px rgba(37, 99, 235, 0.35);
+  }
+}
+
+/* ---------- Completion celebration ---------- */
+
+@keyframes ss-shimmer {
+  0% {
+    transform: translateX(-120%) skewX(-18deg);
+    opacity: 0;
+  }
+  20% {
+    opacity: 0.85;
+  }
+  100% {
+    transform: translateX(260%) skewX(-18deg);
+    opacity: 0;
+  }
+}
+
+@keyframes ss-confetti-pop {
+  0% {
+    transform: translate(0, 0) scale(0.3);
+    opacity: 0;
+  }
+  20% {
+    opacity: 1;
+  }
+  100% {
+    transform: var(--ss-confetti-drift, translate(22px, -38px)) scale(1);
+    opacity: 0;
+  }
+}
+
+@keyframes ss-pulse-ring {
+  0% {
+    box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.55);
+  }
+  70% {
+    box-shadow: 0 0 0 16px rgba(16, 185, 129, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(16, 185, 129, 0);
+  }
+}
+
+.animate-shimmer {
+  animation: ss-shimmer 900ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.animate-pulse-ring {
+  animation: ss-pulse-ring 900ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-shimmer,
+  .animate-pulse-ring,
+  [class*='animate-in'] {
+    animation: none !important;
+    transition: none !important;
+  }
+}

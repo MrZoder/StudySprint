@@ -1,0 +1,41 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+dist
+dist-ssr
+*.local
+
+# Raw/working screenshot files at repo root (curated copies live in /screenshots)
+/DashboardPage*.png
+/AssignmentsPage*.png
+/SubjectsPage*.png
+/SubjectsPageNewDark.png
+/subjectpage.png
+/CalendarPage.png
+/Dash-annotated.png
+/Assignments-annotated.png
+/Subject-annotated.png
+
+# Internal working notes (empty placeholders)
+/Rules.md
+/UiRefinement.md
+/UpgradeUI.md
+/StudySprintNextStepsA2.md
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
