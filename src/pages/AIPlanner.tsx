@@ -1,29 +1,66 @@
-import { useMemo, useRef, useState, type ChangeEvent, type DragEvent } from "react";
+/**
+ * StudySprint AI Planner page — /ai-planner
+ * -----------------------------------------------------------------------------
+ * Academic planning workspace. The student drops a PDF / DOCX / pasted brief,
+ * the server-side AI endpoint returns a structured analysis, and the page
+ * renders a two-column planning desk:
+ *
+ *   main column  → brief summary, requirements, rubric, action-plan split
+ *                   workspace, high-mark guidance, full timeline
+ *   right rail   → status, field signals, missing details, pacing summary,
+ *                   and a sticky convert-to-assignment panel
+ *
+ * Visual goal: calm, restrained, credible. Structure and typography do the
+ * heavy lifting — a single violet accent is used sparingly instead of layered
+ * gradients, glowing halos, and coloured chips.
+ */
+
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ChangeEvent,
+  type DragEvent,
+  type ReactNode,
+} from "react";
 import { Link, useNavigate } from "react-router-dom";
 import {
   AlertCircle,
-  ArrowRight,
+  AlertTriangle,
   ArrowUpRight,
   BookOpen,
-  Brain,
   Calendar as CalendarIcon,
+  Check,
   CheckCircle2,
+  ChevronRight,
+  CircleDot,
   ClipboardList,
+  Compass,
   FileText,
+  Flag,
   GraduationCap,
+  Hash,
   Hourglass,
   Info,
   Layers,
   Lightbulb,
   ListChecks,
   Loader2,
+  Lock,
   Paperclip,
+  PenLine,
+  Plus,
   RefreshCw,
+  Search,
   ShieldCheck,
   Sparkles,
+  SquarePen,
   Target,
+  Trash2,
   Upload,
   Wand2,
+  X,
 } from "lucide-react";
 import { format } from "date-fns";
 
@@ -32,18 +69,22 @@ import Textarea from "../components/ui/Textarea";
 import { usePlanner } from "../context/usePlanner";
 import { useToast } from "../context/useToast";
 import { cn } from "../lib/utils";
-import {
-  analyzeBrief,
-  projectTimeline,
-  type BriefAnalysis,
-  type Deliverable,
-  type PlanStage,
-  type Requirement,
-  type RequirementIcon,
-} from "../lib/briefAnalyzer";
+import { projectTimeline } from "../lib/briefAnalyzer";
+import { extractBriefFromFile } from "../lib/briefExtract";
+import { requestBriefAnalysis } from "../lib/aiPlannerClient";
+import type {
+  BriefAnalysis,
+  Deliverable,
+  FieldSignals,
+  PlanStage,
+  Requirement,
+  RequirementIcon,
+  RubricSignal,
+  SignalConfidence,
+} from "../types/briefAnalysis";
 import type { Priority } from "../types";
 
-/* ---------------------------- Sample + constants --------------------------- */
+/* --------------------------------- Sample --------------------------------- */
 
 const SAMPLE_BRIEF = `Assignment Title: Software Engineering Group Report — Design Proposal
 
@@ -64,6 +105,127 @@ summarise your proposal. This is a group submission (teams of 3).`;
 
 const PRIORITY_OPTIONS: Priority[] = ["Low", "Medium", "High", "Urgent"];
 
+const ANALYSIS_STEPS = [
+  "Reading your brief carefully",
+  "Identifying deliverables and requirements",
+  "Mapping rubric signals and constraints",
+  "Structuring a stage-by-stage action plan",
+  "Pacing the work between now and your due date",
+];
+
+const ACCEPTED_FILE_TYPES =
+  ".pdf,.docx,.txt,.md,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain,text/markdown";
+
+/* ------------------------------ Phase identity ---------------------------- */
+/**
+ * Subtle per-phase treatment. We stay in the violet-blue range for the primary
+ * accent, and let each phase earn a small distinguishing hue — used only as a
+ * hair-thin accent bar, a dot, or a micro-label. Never as a full background.
+ */
+type PhaseKey = "discover" | "research" | "draft" | "refine" | "polish";
+
+interface PhaseTheme {
+  label: string;
+  icon: ReactNode;
+  /** 2px top/left accent bar colour */
+  bar: string;
+  /** small solid dot */
+  dot: string;
+  /** quiet text colour for the phase label itself */
+  text: string;
+  /** soft tint for phase chip background */
+  chip: string;
+  /** border when a phase chip/card needs a whisper of the hue */
+  ring: string;
+}
+
+const PHASE_THEME: Record<PhaseKey, PhaseTheme> = {
+  discover: {
+    label: "Discover",
+    icon: <Compass size={10} />,
+    bar: "bg-sky-400/70 dark:bg-sky-400/80",
+    dot: "bg-sky-400",
+    text: "text-sky-700 dark:text-sky-300",
+    chip: "bg-sky-50 dark:bg-sky-500/10",
+    ring: "ring-sky-200/70 dark:ring-sky-500/20",
+  },
+  research: {
+    label: "Research",
+    icon: <Search size={10} />,
+    bar: "bg-indigo-400/70 dark:bg-indigo-400/80",
+    dot: "bg-indigo-400",
+    text: "text-indigo-700 dark:text-indigo-300",
+    chip: "bg-indigo-50 dark:bg-indigo-500/10",
+    ring: "ring-indigo-200/70 dark:ring-indigo-500/20",
+  },
+  draft: {
+    label: "Draft",
+    icon: <PenLine size={10} />,
+    bar: "bg-violet-500/80 dark:bg-violet-400/90",
+    dot: "bg-violet-500 dark:bg-violet-400",
+    text: "text-violet-700 dark:text-violet-300",
+    chip: "bg-violet-50 dark:bg-violet-500/10",
+    ring: "ring-violet-200/70 dark:ring-violet-500/20",
+  },
+  refine: {
+    label: "Refine",
+    icon: <SquarePen size={10} />,
+    bar: "bg-fuchsia-400/70 dark:bg-fuchsia-400/80",
+    dot: "bg-fuchsia-400",
+    text: "text-fuchsia-700 dark:text-fuchsia-300",
+    chip: "bg-fuchsia-50 dark:bg-fuchsia-500/10",
+    ring: "ring-fuchsia-200/70 dark:ring-fuchsia-500/20",
+  },
+  polish: {
+    label: "Polish",
+    icon: <Sparkles size={10} />,
+    bar: "bg-emerald-400/70 dark:bg-emerald-400/80",
+    dot: "bg-emerald-400",
+    text: "text-emerald-700 dark:text-emerald-300",
+    chip: "bg-emerald-50 dark:bg-emerald-500/10",
+    ring: "ring-emerald-200/70 dark:ring-emerald-500/20",
+  },
+};
+
+const FALLBACK_PHASE: PhaseTheme = {
+  label: "Stage",
+  icon: <CircleDot size={10} />,
+  bar: "bg-slate-400/70 dark:bg-slate-500/70",
+  dot: "bg-slate-400",
+  text: "text-slate-600 dark:text-slate-300",
+  chip: "bg-slate-100 dark:bg-slate-800/60",
+  ring: "ring-slate-200/70 dark:ring-slate-700/60",
+};
+
+function phaseTheme(phaseId: string | undefined): PhaseTheme {
+  if (!phaseId) return FALLBACK_PHASE;
+  return (PHASE_THEME as Record<string, PhaseTheme | undefined>)[phaseId] ?? FALLBACK_PHASE;
+}
+
+/** Split the first sentence off a summary so we can render it as a hero line. */
+function splitSummary(summary: string): { hero: string; rest: string } {
+  const trimmed = summary.trim();
+  if (!trimmed) return { hero: "", rest: "" };
+  const match = trimmed.match(/^(.+?[.!?])(\s+)(.*)$/s);
+  if (!match) return { hero: trimmed, rest: "" };
+  let hero = match[1].trim();
+  let rest = match[3].trim();
+
+  // If the first sentence is too terse (e.g. "Overview."), fold the next
+  // sentence into the hero line so it still reads as a distilled statement.
+  if (hero.length < 40 && rest.length > 0) {
+    const next = rest.match(/^(.+?[.!?])(\s+)(.*)$/s);
+    if (next) {
+      hero = `${hero} ${next[1].trim()}`.trim();
+      rest = next[3].trim();
+    } else {
+      hero = `${hero} ${rest}`.trim();
+      rest = "";
+    }
+  }
+  return { hero, rest };
+}
+
 /* --------------------------------- Page ----------------------------------- */
 
 export default function AIPlanner() {
@@ -72,11 +234,21 @@ export default function AIPlanner() {
   const navigate = useNavigate();
 
   const [brief, setBrief] = useState<string>("");
-  const [fileName, setFileName] = useState<string | null>(null);
+  const [fileMeta, setFileMeta] = useState<{ name: string; kind: string; pages?: number } | null>(
+    null,
+  );
+  const [isExtracting, setIsExtracting] = useState<boolean>(false);
   const [isAnalyzing, setIsAnalyzing] = useState<boolean>(false);
+  const [analysisStep, setAnalysisStep] = useState<number>(0);
   const [isDragging, setIsDragging] = useState<boolean>(false);
+  const [extractionError, setExtractionError] = useState<string | null>(null);
+
   const [analysis, setAnalysis] = useState<BriefAnalysis | null>(null);
+  const [warnings, setWarnings] = useState<string[]>([]);
+  const [fallbackReason, setFallbackReason] = useState<string | null>(null);
+
   const [includedStageIds, setIncludedStageIds] = useState<Set<string>>(new Set());
+  const [selectedStageId, setSelectedStageId] = useState<string | null>(null);
   const [subjectId, setSubjectId] = useState<string>("");
   const [priority, setPriority] = useState<Priority>("High");
   const [editedTitle, setEditedTitle] = useState<string>("");
@@ -85,77 +257,132 @@ export default function AIPlanner() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const charCount = brief.length;
-  const canAnalyze = charCount >= 40 && !isAnalyzing;
+  const canAnalyze = charCount >= 40 && !isAnalyzing && !isExtracting;
 
   const timeline = useMemo(
     () => (analysis ? projectTimeline(analysis.timeline, analysis.dueDateISO) : null),
     [analysis],
   );
 
+  const selectedStage = useMemo(
+    () => analysis?.stages.find((s) => s.id === selectedStageId) ?? null,
+    [analysis, selectedStageId],
+  );
+
   /* --------------------------- Input interactions --------------------------- */
 
-  function handleFile(file: File | null | undefined) {
+  async function handleFile(file: File | null | undefined) {
     if (!file) return;
-    const isText = /\.(txt|md|rtf)$/i.test(file.name) || file.type.startsWith("text/");
-    if (!isText) {
-      showToast({
-        tone: "warning",
-        message: "Only plain text files (.txt, .md) can be read directly. Paste PDF content manually.",
-        durationMs: 4200,
+    setExtractionError(null);
+    setIsExtracting(true);
+    try {
+      const extracted = await extractBriefFromFile(file);
+      setBrief(extracted.text);
+      setFileMeta({
+        name: extracted.filename,
+        kind: extracted.kind,
+        pages: extracted.pageCount,
       });
-      return;
+      showToast({
+        tone: "success",
+        message:
+          extracted.kind === "pdf" && extracted.pageCount
+            ? `Extracted ${extracted.pageCount}-page PDF — ready to analyse.`
+            : `Loaded ${extracted.filename} — ready to analyse.`,
+        durationMs: 3000,
+      });
+    } catch (err) {
+      const message = (err as Error).message;
+      setExtractionError(message);
+      showToast({ tone: "warning", message, durationMs: 4800 });
+    } finally {
+      setIsExtracting(false);
     }
-    const reader = new FileReader();
-    reader.onload = () => {
-      const text = String(reader.result ?? "");
-      setBrief(text);
-      setFileName(file.name);
-    };
-    reader.readAsText(file);
   }
 
   function handleDrop(event: DragEvent<HTMLDivElement>) {
     event.preventDefault();
     setIsDragging(false);
     const file = event.dataTransfer?.files?.[0];
-    handleFile(file);
+    void handleFile(file);
   }
 
   function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
-    handleFile(file);
+    void handleFile(file);
     event.target.value = "";
   }
 
   function handleLoadSample() {
     setBrief(SAMPLE_BRIEF);
-    setFileName(null);
+    setFileMeta(null);
+    setExtractionError(null);
   }
 
   function handleClear() {
     setBrief("");
-    setFileName(null);
+    setFileMeta(null);
     setAnalysis(null);
     setIncludedStageIds(new Set());
+    setSelectedStageId(null);
+    setWarnings([]);
+    setFallbackReason(null);
+    setExtractionError(null);
   }
 
-  function runAnalysis() {
+  /* ------------------------------- Analysis ------------------------------- */
+
+  useEffect(() => {
+    if (!isAnalyzing) return;
+    setAnalysisStep(0);
+    const interval = window.setInterval(() => {
+      setAnalysisStep((prev) => Math.min(prev + 1, ANALYSIS_STEPS.length - 1));
+    }, 850);
+    return () => window.clearInterval(interval);
+  }, [isAnalyzing]);
+
+  async function runAnalysis() {
     if (!canAnalyze) return;
     setIsAnalyzing(true);
     setAnalysis(null);
-    // A small artificial delay makes the analysis feel considered rather than
-    // instantaneous — useful for a "smart" planning UX.
-    window.setTimeout(() => {
-      const result = analyzeBrief(brief);
-      setAnalysis(result);
-      setIncludedStageIds(new Set(result.stages.map((s) => s.id)));
-      setEditedTitle(result.title);
+    setWarnings([]);
+    setFallbackReason(null);
+
+    try {
+      const result = await requestBriefAnalysis({
+        brief,
+        filename: fileMeta?.name,
+      });
+      setAnalysis(result.analysis);
+      setWarnings(result.warnings);
+      setFallbackReason(result.fallbackReason ?? null);
+      setIncludedStageIds(new Set(result.analysis.stages.map((s) => s.id)));
+      setSelectedStageId(result.analysis.stages[0]?.id ?? null);
+      setEditedTitle(result.analysis.title);
       setEditedDueDate(
-        result.dueDateISO ? format(new Date(result.dueDateISO), "yyyy-MM-dd") : "",
+        result.analysis.dueDateISO
+          ? format(new Date(result.analysis.dueDateISO), "yyyy-MM-dd")
+          : "",
       );
       setSubjectId((prev) => prev || subjects[0]?.id || "");
+
+      if (result.fallbackReason) {
+        showToast({
+          tone: "warning",
+          message:
+            "Using on-device fallback — the AI service wasn't reachable. Plan is still editable.",
+          durationMs: 4600,
+        });
+      }
+    } catch (err) {
+      showToast({
+        tone: "warning",
+        message: `Analysis failed: ${(err as Error).message}`,
+        durationMs: 4600,
+      });
+    } finally {
       setIsAnalyzing(false);
-    }, 1100);
+    }
   }
 
   /* --------------------------- Stage interactions --------------------------- */
@@ -187,11 +414,18 @@ export default function AIPlanner() {
       ...analysis,
       stages: analysis.stages.map((s) =>
         s.id === stageId
-          ? {
-              ...s,
-              subtasks: s.subtasks.map((t, i) => (i === index ? value : t)),
-            }
+          ? { ...s, subtasks: s.subtasks.map((t, i) => (i === index ? value : t)) }
           : s,
+      ),
+    });
+  }
+
+  function addSubtask(stageId: string) {
+    if (!analysis) return;
+    setAnalysis({
+      ...analysis,
+      stages: analysis.stages.map((s) =>
+        s.id === stageId ? { ...s, subtasks: [...s.subtasks, "New subtask"] } : s,
       ),
     });
   }
@@ -224,8 +458,6 @@ export default function AIPlanner() {
       : new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString();
 
     const selectedStages = analysis.stages.filter((s) => includedStageIds.has(s.id));
-    // Flatten stage → subtask list, prefixing each subtask with the stage name
-    // so the context is clear inside the StudySprint assignment detail page.
     const subtaskTitles = selectedStages.flatMap((stage) =>
       stage.subtasks.length > 0
         ? stage.subtasks.map((t) => `[${stage.title}] ${t}`)
@@ -237,7 +469,9 @@ export default function AIPlanner() {
       subjectId,
       dueDate: dueISO,
       priority,
-      notes: `Generated from AI brief breakdown.\n\n${analysis.summary}`,
+      notes: `Generated from AI Planner (${
+        analysis.source === "llm" ? analysis.model || "LLM" : "on-device planner"
+      }).\n\n${analysis.summary}`,
       subtasks: subtaskTitles,
     });
 
@@ -263,18 +497,18 @@ export default function AIPlanner() {
   /* --------------------------------- Render -------------------------------- */
 
   return (
-    <div className="space-y-7 animate-in fade-in duration-500">
-      {/* Introduction */}
-      <HeaderIntro />
+    <div className="space-y-6 animate-in fade-in duration-500">
+      <PageHeader />
 
-      {/* Input */}
       <InputStudio
         brief={brief}
         setBrief={setBrief}
         charCount={charCount}
         isAnalyzing={isAnalyzing}
+        isExtracting={isExtracting}
         canAnalyze={canAnalyze}
-        fileName={fileName}
+        fileMeta={fileMeta}
+        extractionError={extractionError}
         isDragging={isDragging}
         setIsDragging={setIsDragging}
         onDrop={handleDrop}
@@ -283,60 +517,87 @@ export default function AIPlanner() {
         onLoadSample={handleLoadSample}
         onClear={handleClear}
         onAnalyze={runAnalysis}
+        onClearFile={() => {
+          setFileMeta(null);
+          setBrief("");
+        }}
         fileInputRef={fileInputRef}
       />
 
-      {/* Analysing state */}
-      {isAnalyzing && <AnalyzingState />}
+      {isAnalyzing && <AnalyzingState activeStep={analysisStep} />}
 
-      {/* Results */}
       {analysis && !isAnalyzing && (
-        <div className="space-y-6">
-          <AnalysisHeader analysis={analysis} onReset={handleClear} />
+        <section className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_320px] xl:grid-cols-[minmax(0,1fr)_340px]">
+          {/* Main working area */}
+          <div className="min-w-0 space-y-5">
+            <AnalysisHeader analysis={analysis} onReset={handleClear} />
 
-          <div className="grid gap-5 lg:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)]">
+            {fallbackReason && <FallbackBanner reason={fallbackReason} />}
+
+            {warnings.length > 0 && <WarningsCard warnings={warnings} />}
+
             <SummaryCard analysis={analysis} />
+
             <RequirementsCard
               deliverables={analysis.deliverables}
               requirements={analysis.requirements}
+              requiredSections={analysis.requiredSections}
             />
+
+            {analysis.rubricSignals.length > 0 && (
+              <RubricCard signals={analysis.rubricSignals} />
+            )}
+
+            <ActionPlanWorkspace
+              stages={analysis.stages}
+              selectedStageId={selectedStageId}
+              setSelectedStageId={setSelectedStageId}
+              selectedStage={selectedStage}
+              includedStageIds={includedStageIds}
+              onToggleStage={toggleStage}
+              onRemoveSubtask={removeSubtask}
+              onUpdateSubtask={updateSubtaskText}
+              onAddSubtask={addSubtask}
+            />
+
+            {timeline && timeline.length > 0 && analysis.dueDateISO && (
+              <TimelineCard phases={timeline} dueDateISO={analysis.dueDateISO} />
+            )}
+
+            {analysis.highMarkTips.length > 0 && (
+              <HighMarkCard tips={analysis.highMarkTips} />
+            )}
+
+            <EthicalNote source={analysis.source} model={analysis.model} />
           </div>
 
-          <ActionPlanCard
-            stages={analysis.stages}
-            includedStageIds={includedStageIds}
-            onToggleStage={toggleStage}
-            onRemoveSubtask={removeSubtask}
-            onUpdateSubtask={updateSubtaskText}
-          />
-
-          {timeline && timeline.length > 0 && (
-            <TimelineCard
-              phases={timeline}
-              dueDateISO={analysis.dueDateISO}
+          {/* Right rail */}
+          <aside className="space-y-4 lg:sticky lg:top-4 lg:self-start">
+            <StatusCard analysis={analysis} />
+            <SignalsCard signals={analysis.signals} />
+            {analysis.missingDetails.length > 0 && (
+              <MissingDetailsCard items={analysis.missingDetails} />
+            )}
+            {timeline && timeline.length > 0 && (
+              <PacingRailCard phases={timeline} dueDateISO={analysis.dueDateISO} />
+            )}
+            <ConvertPanel
+              subjects={subjects}
+              subjectId={subjectId}
+              setSubjectId={setSubjectId}
+              editedTitle={editedTitle}
+              setEditedTitle={setEditedTitle}
+              editedDueDate={editedDueDate}
+              setEditedDueDate={setEditedDueDate}
+              priority={priority}
+              setPriority={setPriority}
+              includedStages={analysis.stages.filter((s) => includedStageIds.has(s.id)).length}
+              totalStages={analysis.stages.length}
+              totalSubtasks={totalSelectedSubtasks}
+              onConvert={handleConvertToAssignment}
             />
-          )}
-
-          <HighMarkCard tips={analysis.highMarkTips} />
-
-          <ConvertCard
-            subjects={subjects}
-            subjectId={subjectId}
-            setSubjectId={setSubjectId}
-            editedTitle={editedTitle}
-            setEditedTitle={setEditedTitle}
-            editedDueDate={editedDueDate}
-            setEditedDueDate={setEditedDueDate}
-            priority={priority}
-            setPriority={setPriority}
-            includedStages={analysis.stages.filter((s) => includedStageIds.has(s.id)).length}
-            totalStages={analysis.stages.length}
-            totalSubtasks={totalSelectedSubtasks}
-            onConvert={handleConvertToAssignment}
-          />
-
-          <EthicalNote />
-        </div>
+          </aside>
+        </section>
       )}
 
       {!analysis && !isAnalyzing && <IntroExamples onLoadSample={handleLoadSample} />}
@@ -344,109 +605,48 @@ export default function AIPlanner() {
   );
 }
 
-/* -------------------------------- Sections -------------------------------- */
+/* ============================================================================
+ * Header
+ * ========================================================================== */
 
-function HeaderIntro() {
+function PageHeader() {
   return (
-    <section className="relative overflow-hidden rounded-3xl border border-violet-200/70 bg-gradient-to-br from-violet-50 via-white to-cyan-50/60 p-6 shadow-[0_1px_2px_rgba(15,23,42,0.04),0_30px_60px_-40px_rgba(124,58,237,0.35)] dark:border-violet-900/50 dark:from-[#0a0b24] dark:via-[#060918] dark:to-[#06161f] sm:p-8">
-      <div
-        aria-hidden
-        className="pointer-events-none absolute -right-20 -top-20 h-72 w-72 rounded-full bg-gradient-to-br from-violet-400/25 via-fuchsia-300/15 to-transparent blur-3xl dark:from-violet-500/30"
-      />
-      <div
-        aria-hidden
-        className="pointer-events-none absolute -left-20 bottom-0 h-60 w-60 rounded-full bg-gradient-to-br from-cyan-300/25 via-blue-300/15 to-transparent blur-3xl dark:from-cyan-500/25"
-      />
-      <div className="relative grid gap-6 lg:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)] lg:items-center">
-        <div>
-          <div className="inline-flex items-center gap-2 rounded-full border border-violet-200 bg-white/80 px-3 py-1 text-[11px] font-bold uppercase tracking-[0.14em] text-violet-700 backdrop-blur dark:border-violet-800/70 dark:bg-violet-950/40 dark:text-violet-200">
-            <Sparkles size={12} />
-            Planner assist · beta
-          </div>
-          <h1 className="mt-4 text-3xl font-bold tracking-tight text-gray-900 sm:text-[34px] dark:text-white">
-            Drop in your brief.{" "}
-            <span className="bg-gradient-to-r from-violet-600 via-fuchsia-500 to-cyan-500 bg-clip-text text-transparent">
-              Leave with a plan.
-            </span>
-          </h1>
-          <p className="mt-3 max-w-2xl text-[15px] leading-relaxed text-slate-600 dark:text-slate-300">
-            Paste an assignment brief and StudySprint will help you understand the task,
-            pull out what actually matters, and turn it into a realistic action plan you can
-            work through — not an answer, a <em>path forward</em>.
-          </p>
-          <ul className="mt-5 grid gap-2 text-[13px] text-slate-700 sm:grid-cols-2 dark:text-slate-300">
-            {[
-              { icon: Brain, text: "Plain-language summary of what the brief is really asking" },
-              { icon: ListChecks, text: "Deliverables and requirements pulled into a checklist" },
-              { icon: Layers, text: "Staged action plan, editable before you save" },
-              { icon: CalendarIcon, text: "Suggested pacing from now until the due date" },
-            ].map((row) => (
-              <li key={row.text} className="flex items-start gap-2">
-                <span className="mt-0.5 inline-flex size-6 shrink-0 items-center justify-center rounded-md bg-gradient-to-br from-violet-500/15 to-cyan-500/15 text-violet-600 ring-1 ring-violet-200/60 dark:text-violet-200 dark:ring-violet-800/60">
-                  <row.icon size={12} />
-                </span>
-                <span>{row.text}</span>
-              </li>
-            ))}
-          </ul>
-        </div>
-        <div className="hidden lg:block">
-          <StudioPreviewCard />
-        </div>
+    <header className="flex flex-wrap items-start justify-between gap-4 border-b border-slate-200 pb-5 dark:border-slate-800">
+      <div className="min-w-0">
+        <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-slate-400">
+          Planner
+        </p>
+        <h1 className="mt-1 text-[24px] font-semibold tracking-tight text-slate-900 dark:text-white sm:text-[26px]">
+          Assignment planner
+        </h1>
+        <p className="mt-1.5 max-w-xl text-[13.5px] leading-relaxed text-slate-600 dark:text-slate-400">
+          Upload or paste an assignment brief. StudySprint interprets the
+          requirements and lays out a staged plan you can refine before turning
+          it into a real assignment. It helps you plan — it doesn&apos;t write
+          the work.
+        </p>
       </div>
-    </section>
-  );
-}
-
-function StudioPreviewCard() {
-  return (
-    <div className="relative rounded-2xl border border-white/80 bg-white/90 p-4 shadow-xl shadow-violet-900/10 backdrop-blur-sm dark:border-slate-800 dark:bg-[#050d1b]/95 dark:shadow-[0_40px_80px_-40px_rgba(124,58,237,0.5)]">
-      <div className="flex items-center gap-2 text-[11px] font-semibold text-slate-500 dark:text-slate-400">
-        <Wand2 size={13} className="text-violet-500 dark:text-violet-300" />
-        StudySprint planner assist
-      </div>
-      <div className="mt-3 space-y-2.5">
-        <PreviewRow label="Understand the brief" status="todo" />
-        <PreviewRow label="Map the rubric" status="todo" />
-        <PreviewRow label="Gather credible sources" status="todo" />
-        <PreviewRow label="Draft section by section" status="todo" />
-        <PreviewRow label="Rubric self-check" status="todo" />
-      </div>
-      <div className="mt-4 rounded-xl border border-dashed border-slate-300 bg-slate-50/60 px-3 py-2 text-[11px] text-slate-600 dark:border-slate-700 dark:bg-slate-900/40 dark:text-slate-300">
-        <span className="font-semibold text-slate-800 dark:text-white">Pacing:</span>{" "}
-        Discover · Research · Draft · Refine · Polish
-      </div>
-    </div>
-  );
-}
-
-function PreviewRow({ label, status }: { label: string; status: "todo" | "done" }) {
-  return (
-    <div className="flex items-center gap-2 rounded-lg bg-slate-50/80 px-2.5 py-1.5 dark:bg-slate-900/40">
-      <span
-        className={cn(
-          "inline-flex size-4 items-center justify-center rounded-sm border",
-          status === "done"
-            ? "border-emerald-500 bg-emerald-500 text-white"
-            : "border-slate-300 bg-white dark:border-slate-600 dark:bg-slate-800",
-        )}
-      >
-        {status === "done" && <CheckCircle2 size={10} />}
+      <span className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-medium text-slate-600 dark:border-slate-800 dark:bg-slate-900/60 dark:text-slate-300">
+        <Lock size={11} className="text-emerald-600 dark:text-emerald-400" />
+        Server-side · not stored
       </span>
-      <span className="text-[12px] font-medium text-slate-700 dark:text-slate-200">{label}</span>
-    </div>
+    </header>
   );
 }
 
-/* ---------------------------- Input studio ------------------------------- */
+/* ============================================================================
+ * Input studio
+ * ========================================================================== */
 
 interface InputStudioProps {
   brief: string;
   setBrief: (value: string) => void;
   charCount: number;
   isAnalyzing: boolean;
+  isExtracting: boolean;
   canAnalyze: boolean;
-  fileName: string | null;
+  fileMeta: { name: string; kind: string; pages?: number } | null;
+  extractionError: string | null;
   isDragging: boolean;
   setIsDragging: (v: boolean) => void;
   onDrop: (event: DragEvent<HTMLDivElement>) => void;
@@ -455,6 +655,7 @@ interface InputStudioProps {
   onLoadSample: () => void;
   onClear: () => void;
   onAnalyze: () => void;
+  onClearFile: () => void;
   fileInputRef: React.RefObject<HTMLInputElement | null>;
 }
 
@@ -463,8 +664,10 @@ function InputStudio({
   setBrief,
   charCount,
   isAnalyzing,
+  isExtracting,
   canAnalyze,
-  fileName,
+  fileMeta,
+  extractionError,
   isDragging,
   setIsDragging,
   onDrop,
@@ -473,15 +676,16 @@ function InputStudio({
   onLoadSample,
   onClear,
   onAnalyze,
+  onClearFile,
   fileInputRef,
 }: InputStudioProps) {
   return (
     <section
       className={cn(
-        "relative overflow-hidden rounded-3xl border bg-white/95 p-5 shadow-[0_1px_2px_rgba(15,23,42,0.05),0_24px_60px_-36px_rgba(15,23,42,0.2)] transition-colors sm:p-6 dark:bg-[#060e1e]/90",
+        "rounded-2xl border bg-white p-5 shadow-sm transition-colors sm:p-6 dark:bg-[#0a1020]",
         isDragging
-          ? "border-violet-400 bg-violet-50/70 ring-4 ring-violet-200/50 dark:border-violet-500 dark:bg-violet-950/25"
-          : "border-slate-200/80 dark:border-slate-800",
+          ? "border-violet-400 ring-2 ring-violet-200/60 dark:border-violet-500 dark:ring-violet-900/50"
+          : "border-slate-200 dark:border-slate-800",
       )}
       onDragOver={(e) => {
         e.preventDefault();
@@ -492,63 +696,127 @@ function InputStudio({
     >
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
-          <h2 className="flex items-center gap-2 text-[17px] font-bold tracking-tight text-slate-900 dark:text-white">
-            <span className="inline-flex size-8 items-center justify-center rounded-xl bg-gradient-to-br from-violet-500/15 to-cyan-500/15 text-violet-600 ring-1 ring-violet-200/70 dark:text-violet-200 dark:ring-violet-800/60">
-              <FileText size={15} />
-            </span>
-            Your assignment brief
+          <h2 className="text-[15px] font-semibold tracking-tight text-slate-900 dark:text-white">
+            Your brief
           </h2>
-          <p className="mt-1 max-w-2xl text-[13px] text-slate-600 dark:text-slate-300">
-            Paste the full brief, rubric, or assignment instructions below. The more
-            context you give, the better the plan — the assist works fully on your device,
-            so nothing leaves your browser.
+          <p className="mt-1 max-w-2xl text-[12.5px] text-slate-600 dark:text-slate-400">
+            PDF, DOCX, or pasted text. The more context (brief + rubric + word
+            count + due date), the sharper the plan.
           </p>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <Button variant="ghost" size="sm" onClick={onLoadSample} iconLeft={<Sparkles size={13} />}>
-            Load sample brief
-          </Button>
-          <Button variant="secondary" size="sm" onClick={onPickFile} iconLeft={<Upload size={13} />}>
-            Upload .txt / .md
+        <div className="flex items-center gap-2">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={onLoadSample}
+            iconLeft={<Wand2 size={12} />}
+          >
+            Load sample
           </Button>
           <input
             ref={fileInputRef}
             type="file"
-            accept=".txt,.md,text/plain,text/markdown"
+            accept={ACCEPTED_FILE_TYPES}
             onChange={onFileChange}
             className="hidden"
           />
         </div>
       </div>
 
-      <div className="mt-4 rounded-2xl border border-slate-200/70 bg-slate-50/50 p-0.5 dark:border-slate-800 dark:bg-slate-900/40">
+      {/* Drop zone */}
+      <div className="mt-4">
+        <button
+          type="button"
+          onClick={onPickFile}
+          disabled={isExtracting}
+          className={cn(
+            "group flex w-full flex-col items-center justify-center gap-2.5 rounded-xl border border-dashed p-6 text-center transition-colors",
+            isDragging
+              ? "border-violet-500 bg-violet-50/60 dark:border-violet-400 dark:bg-violet-950/25"
+              : "border-slate-300 bg-slate-50/50 hover:border-slate-400 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900/40 dark:hover:border-slate-600 dark:hover:bg-slate-900/60",
+            isExtracting && "cursor-wait opacity-80",
+          )}
+          aria-label="Upload assignment brief"
+        >
+          <span className="inline-flex size-11 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300">
+            {isExtracting ? (
+              <Loader2 size={18} className="animate-spin" />
+            ) : (
+              <Upload size={18} />
+            )}
+          </span>
+          <div>
+            <p className="text-[13.5px] font-semibold text-slate-900 dark:text-white">
+              {isExtracting ? "Extracting your brief…" : "Drop a PDF, DOCX, or text file"}
+            </p>
+            <p className="mt-0.5 text-[12px] text-slate-500 dark:text-slate-400">
+              Click to browse · up to 20 MB · scanned PDFs need a text-copy export
+            </p>
+          </div>
+        </button>
+
+        {fileMeta && (
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-200 bg-slate-50/70 px-3 py-2 text-[12px] text-slate-700 dark:border-slate-800 dark:bg-slate-900/50 dark:text-slate-200">
+            <span className="flex items-center gap-2 min-w-0">
+              <Paperclip size={12} className="shrink-0 text-slate-400" />
+              <span className="truncate font-medium">{fileMeta.name}</span>
+              <span className="shrink-0 rounded-sm bg-slate-200/80 px-1 text-[10px] font-semibold uppercase tracking-wider text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+                {fileMeta.kind}
+              </span>
+              {fileMeta.pages != null && (
+                <span className="shrink-0 tabular-nums text-slate-500 dark:text-slate-400">
+                  · {fileMeta.pages} pages
+                </span>
+              )}
+            </span>
+            <button
+              type="button"
+              onClick={onClearFile}
+              className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-medium text-slate-500 hover:bg-slate-200/80 hover:text-slate-700 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-200"
+            >
+              <X size={11} /> Remove
+            </button>
+          </div>
+        )}
+
+        {extractionError && (
+          <div className="mt-3 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[12px] text-amber-800 dark:border-amber-900/50 dark:bg-amber-950/25 dark:text-amber-200">
+            <AlertTriangle size={12} className="mt-0.5 shrink-0" />
+            <span>{extractionError}</span>
+          </div>
+        )}
+      </div>
+
+      {/* Divider */}
+      <div className="relative mt-5 flex items-center gap-3 text-[10.5px] font-semibold uppercase tracking-[0.2em] text-slate-400 dark:text-slate-500">
+        <span className="h-px flex-1 bg-slate-200 dark:bg-slate-800" />
+        Or paste the brief
+        <span className="h-px flex-1 bg-slate-200 dark:bg-slate-800" />
+      </div>
+
+      <div className="mt-3">
         <Textarea
           value={brief}
           onChange={(e) => setBrief(e.target.value)}
-          rows={10}
-          placeholder="Paste the assignment brief here — or drag a .txt / .md file onto this card.\n\nThe more detail (brief + rubric + word count + due date), the sharper the plan."
-          className="min-h-[220px] resize-y !border-transparent !bg-transparent text-[14px] leading-relaxed focus:!border-transparent dark:!bg-transparent"
+          rows={8}
+          placeholder="Paste the assignment brief, rubric, and any submission instructions here."
+          className="min-h-[160px] resize-y text-[13.5px] leading-relaxed"
         />
       </div>
 
       <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-3 text-[12px] text-slate-500 dark:text-slate-400">
-          {fileName ? (
-            <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-emerald-700 dark:border-emerald-900/50 dark:bg-emerald-950/40 dark:text-emerald-300">
-              <Paperclip size={11} />
-              {fileName}
-            </span>
-          ) : (
-            <span className="inline-flex items-center gap-1.5">
-              <Info size={12} />
-              Drag & drop supported for plain text files
-            </span>
-          )}
-          <span className="tabular-nums">{charCount.toLocaleString()} chars</span>
-        </div>
+        <span className="inline-flex items-center gap-1.5 text-[12px] text-slate-500 dark:text-slate-400">
+          <Info size={12} />
+          Drag &amp; drop supported · {charCount.toLocaleString()} chars
+        </span>
         <div className="flex items-center gap-2">
           {brief.length > 0 && (
-            <Button variant="ghost" size="sm" onClick={onClear} iconLeft={<RefreshCw size={13} />}>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={onClear}
+              iconLeft={<RefreshCw size={12} />}
+            >
               Start over
             </Button>
           )}
@@ -556,62 +824,77 @@ function InputStudio({
             variant="primary"
             onClick={onAnalyze}
             disabled={!canAnalyze}
-            iconLeft={isAnalyzing ? <Loader2 size={15} className="animate-spin" /> : <Wand2 size={15} />}
-            className="bg-gradient-to-br from-violet-600 via-fuchsia-500 to-cyan-500 hover:from-violet-500 hover:via-fuchsia-400 hover:to-cyan-400 disabled:bg-slate-300 dark:disabled:bg-slate-700"
+            iconLeft={
+              isAnalyzing ? <Loader2 size={14} className="animate-spin" /> : <Wand2 size={14} />
+            }
+            className="bg-violet-600 hover:bg-violet-700 disabled:bg-slate-300 dark:bg-violet-600 dark:hover:bg-violet-500 dark:disabled:bg-slate-700"
           >
-            {isAnalyzing ? "Analysing brief…" : "Break down my brief"}
+            {isAnalyzing ? "Analysing brief…" : "Analyse brief"}
           </Button>
         </div>
       </div>
 
       {charCount > 0 && charCount < 40 && (
         <p className="mt-2 text-[11.5px] text-amber-700 dark:text-amber-300">
-          Add a little more context (40+ characters) so the assist has enough signal.
+          Add a little more context (40+ characters) so the planner has enough signal.
         </p>
       )}
     </section>
   );
 }
 
-/* --------------------------- Analysing state ----------------------------- */
+/* ============================================================================
+ * Analysing state
+ * ========================================================================== */
 
-function AnalyzingState() {
-  const steps = [
-    "Reading your brief carefully…",
-    "Identifying deliverables and requirements…",
-    "Building the staged action plan…",
-    "Pacing the work across the weeks you have…",
-  ];
+function AnalyzingState({ activeStep }: { activeStep: number }) {
   return (
-    <section className="relative overflow-hidden rounded-3xl border border-violet-200 bg-gradient-to-br from-white via-violet-50/70 to-cyan-50/60 p-6 shadow-sm dark:border-violet-900/60 dark:from-[#08081d] dark:via-[#0a0b24] dark:to-[#06161f]">
-      <div
-        aria-hidden
-        className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_20%_30%,rgba(139,92,246,0.15),transparent_55%),radial-gradient(circle_at_80%_70%,rgba(34,211,238,0.15),transparent_55%)]"
-      />
-      <div className="relative flex items-start gap-4">
-        <span className="inline-flex size-12 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-violet-500 to-cyan-500 text-white shadow-lg shadow-violet-500/30">
-          <Loader2 size={22} className="animate-spin" />
+    <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-[#0a1020] sm:p-6">
+      <div className="flex items-start gap-3">
+        <span className="inline-flex size-9 shrink-0 items-center justify-center rounded-lg border border-violet-200 bg-violet-50 text-violet-700 dark:border-violet-900/60 dark:bg-violet-950/40 dark:text-violet-200">
+          <Loader2 size={16} className="animate-spin" />
         </span>
-        <div className="min-w-0">
-          <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-violet-700 dark:text-violet-300">
-            Working through your brief
+        <div className="min-w-0 flex-1">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">
+            Working on your brief
           </p>
-          <h3 className="mt-1 text-lg font-bold text-slate-900 dark:text-white">
+          <h3 className="mt-0.5 text-[15px] font-semibold text-slate-900 dark:text-white">
             Turning instructions into a plan
           </h3>
-          <ul className="mt-4 space-y-1.5 text-[13px] text-slate-700 dark:text-slate-300">
-            {steps.map((s, i) => (
-              <li
-                key={s}
-                className="flex items-center gap-2 opacity-0 animate-in fade-in slide-in-from-left-2"
-                style={{ animationDelay: `${i * 220}ms`, animationFillMode: "forwards" }}
-              >
-                <span className="inline-flex size-5 items-center justify-center rounded-full bg-violet-100 text-violet-600 dark:bg-violet-900/50 dark:text-violet-200">
-                  <Sparkles size={10} />
-                </span>
-                {s}
-              </li>
-            ))}
+          <ul className="mt-3 space-y-1.5 text-[12.5px] text-slate-700 dark:text-slate-300">
+            {ANALYSIS_STEPS.map((step, i) => {
+              const done = i < activeStep;
+              const active = i === activeStep;
+              return (
+                <li
+                  key={step}
+                  className={cn(
+                    "flex items-center gap-2 transition-opacity",
+                    i > activeStep && "opacity-50",
+                  )}
+                >
+                  <span
+                    className={cn(
+                      "inline-flex size-4 items-center justify-center rounded-full transition-colors",
+                      done
+                        ? "bg-emerald-500 text-white"
+                        : active
+                        ? "bg-violet-500 text-white"
+                        : "bg-slate-200 text-slate-500 dark:bg-slate-800 dark:text-slate-400",
+                    )}
+                  >
+                    {done ? (
+                      <Check size={9} />
+                    ) : active ? (
+                      <Loader2 size={9} className="animate-spin" />
+                    ) : null}
+                  </span>
+                  <span className={cn(active && "font-semibold text-slate-900 dark:text-white")}>
+                    {step}
+                  </span>
+                </li>
+              );
+            })}
           </ul>
         </div>
       </div>
@@ -619,7 +902,61 @@ function AnalyzingState() {
   );
 }
 
-/* ---------------------- Analysis top — title chips ------------------------ */
+/* ============================================================================
+ * Fallback / warnings banners
+ * ========================================================================== */
+
+function FallbackBanner({ reason }: { reason: string }) {
+  return (
+    <div className="flex items-start gap-2.5 rounded-xl border border-amber-200/80 bg-amber-50/70 px-4 py-2.5 text-[12.5px] leading-snug text-amber-900 dark:border-amber-500/20 dark:bg-amber-500/[0.07] dark:text-amber-200">
+      <AlertTriangle size={13} className="mt-0.5 shrink-0 text-amber-600 dark:text-amber-300" />
+      <span>
+        <span className="font-semibold">On-device fallback in use.</span>{" "}
+        The AI service wasn&apos;t reachable ({reason}). This plan came from
+        the built-in heuristic planner — still fully editable and convertible.
+      </span>
+    </div>
+  );
+}
+
+function WarningsCard({ warnings }: { warnings: string[] }) {
+  return (
+    <article className="relative overflow-hidden rounded-2xl border border-amber-200/80 bg-amber-50/60 px-5 py-4 text-amber-900 shadow-sm dark:border-amber-500/20 dark:bg-amber-500/[0.06] dark:text-amber-100">
+      <span
+        aria-hidden
+        className="absolute inset-y-0 left-0 w-[3px] bg-amber-400/80 dark:bg-amber-400/60"
+      />
+      <header className="flex items-center gap-2.5">
+        <span className="inline-flex size-7 items-center justify-center rounded-lg bg-amber-100 text-amber-700 ring-1 ring-amber-200/80 dark:bg-amber-400/15 dark:text-amber-200 dark:ring-amber-400/30">
+          <AlertTriangle size={13} />
+        </span>
+        <div className="min-w-0">
+          <p className="text-[10.5px] font-semibold uppercase tracking-[0.16em] text-amber-700 dark:text-amber-300">
+            Review checkpoint
+          </p>
+          <h3 className="text-[14px] font-semibold leading-tight text-amber-900 dark:text-amber-50">
+            Read these before you convert
+          </h3>
+        </div>
+      </header>
+      <ul className="mt-3 space-y-2 pl-1">
+        {warnings.map((w) => (
+          <li
+            key={w}
+            className="flex items-start gap-2.5 text-[12.5px] leading-relaxed text-amber-900/90 dark:text-amber-100/90"
+          >
+            <span className="mt-[7px] inline-block size-[5px] shrink-0 rounded-full bg-amber-500/90 dark:bg-amber-300" />
+            <span>{w}</span>
+          </li>
+        ))}
+      </ul>
+    </article>
+  );
+}
+
+/* ============================================================================
+ * Analysis header (title + quiet meta)
+ * ========================================================================== */
 
 function AnalysisHeader({
   analysis,
@@ -628,147 +965,227 @@ function AnalysisHeader({
   analysis: BriefAnalysis;
   onReset: () => void;
 }) {
-  const confidenceTone =
-    analysis.confidence === "high"
-      ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-200"
-      : analysis.confidence === "medium"
-      ? "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-200"
-      : "bg-slate-100 text-slate-600 dark:bg-slate-800/60 dark:text-slate-300";
-
+  const isLLM = analysis.source === "llm";
   return (
-    <div className="flex flex-wrap items-center justify-between gap-3">
-      <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.2em] text-violet-700 dark:text-violet-300">
-        <span className="inline-flex size-6 items-center justify-center rounded-md bg-violet-100 text-violet-700 dark:bg-violet-900/50 dark:text-violet-200">
-          <Sparkles size={11} />
+    <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-slate-200 pb-3 dark:border-slate-800/80">
+      <div className="flex min-w-0 items-center gap-3">
+        <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-200/80 bg-emerald-50 px-2 py-0.5 text-[10.5px] font-semibold uppercase tracking-[0.14em] text-emerald-700 dark:border-emerald-500/20 dark:bg-emerald-500/10 dark:text-emerald-300">
+          <span className="size-1.5 rounded-full bg-emerald-500 dark:bg-emerald-400" />
+          Analysis complete
         </span>
-        Analysis ready
-      </div>
-      <div className="flex items-center gap-2">
-        <span
-          className={cn(
-            "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[10.5px] font-bold uppercase tracking-[0.14em]",
-            confidenceTone,
-          )}
-        >
-          <ShieldCheck size={11} />
-          {analysis.confidence} confidence
-        </span>
-        {analysis.estimatedHours && (
-          <span className="inline-flex items-center gap-1.5 rounded-full bg-blue-100 px-2.5 py-1 text-[10.5px] font-bold uppercase tracking-[0.14em] text-blue-700 dark:bg-blue-900/40 dark:text-blue-200">
-            <Hourglass size={11} />~{analysis.estimatedHours}h of work
+
+        <span className="hidden h-3 w-px bg-slate-200 dark:bg-slate-800 sm:inline-block" />
+
+        <div className="flex min-w-0 flex-col leading-tight">
+          <span className="flex items-center gap-1.5 text-[11.5px] font-medium text-slate-700 dark:text-slate-200">
+            {isLLM ? (
+              <Sparkles size={11} className="text-violet-500 dark:text-violet-300" />
+            ) : (
+              <ListChecks size={11} className="text-slate-500 dark:text-slate-400" />
+            )}
+            <span className="truncate">
+              {isLLM ? analysis.model ?? "Language model" : "On-device planner"}
+            </span>
           </span>
-        )}
-        <Button variant="ghost" size="sm" onClick={onReset} iconLeft={<RefreshCw size={12} />}>
-          New brief
-        </Button>
+          <span className="text-[10.5px] text-slate-500 dark:text-slate-500">
+            {isLLM
+              ? "AI-assisted interpretation · verify against your brief"
+              : "Heuristic interpretation · no AI model available"}
+          </span>
+        </div>
       </div>
+
+      <Button
+        variant="ghost"
+        size="sm"
+        onClick={onReset}
+        iconLeft={<RefreshCw size={12} />}
+        className="text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white"
+      >
+        New brief
+      </Button>
     </div>
   );
 }
 
-/* -------------------------------- Summary -------------------------------- */
+/* ============================================================================
+ * Summary
+ * ========================================================================== */
 
 function SummaryCard({ analysis }: { analysis: BriefAnalysis }) {
+  const { hero, rest } = splitSummary(analysis.summary);
   return (
-    <article className="relative overflow-hidden rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-[#060e1e]/90">
-      <header className="flex items-center gap-2">
-        <span className="inline-flex size-8 items-center justify-center rounded-xl bg-violet-100 text-violet-700 dark:bg-violet-900/50 dark:text-violet-200">
-          <Brain size={15} />
-        </span>
-        <div className="min-w-0">
-          <p className="text-[10.5px] font-semibold uppercase tracking-[0.16em] text-violet-700 dark:text-violet-300">
-            Brief summary
-          </p>
-          <h3 className="mt-0.5 text-[17px] font-bold leading-tight text-slate-900 dark:text-white">
-            {analysis.title}
-          </h3>
-        </div>
-      </header>
+    <article className="relative overflow-hidden rounded-2xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-[#0a1020]">
+      {/* subtle hairline accent */}
+      <span
+        aria-hidden
+        className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-violet-400/50 to-transparent dark:via-violet-500/40"
+      />
 
-      <p className="mt-4 text-[14px] leading-relaxed text-slate-700 dark:text-slate-200">
-        {analysis.summary}
+      <div className="flex items-center gap-2 text-[10.5px] font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-slate-400">
+        <span className="inline-flex size-4 items-center justify-center rounded-sm bg-violet-100/80 text-violet-600 dark:bg-violet-500/15 dark:text-violet-300">
+          <ListChecks size={10} />
+        </span>
+        Brief summary
+      </div>
+
+      <p className="mt-2 text-[13px] font-medium uppercase tracking-wide text-slate-400 dark:text-slate-500">
+        {analysis.title}
       </p>
 
-      {analysis.dueDatePhrase && (
-        <div className="mt-4 inline-flex items-center gap-2 rounded-xl border border-blue-200/80 bg-blue-50/60 px-3 py-2 text-[12px] text-blue-800 dark:border-blue-900/50 dark:bg-blue-950/30 dark:text-blue-200">
-          <CalendarIcon size={13} />
-          Due-date signal detected: <span className="font-semibold">{analysis.dueDatePhrase}</span>
-          {analysis.dueDateISO && (
-            <span className="text-blue-600 dark:text-blue-300">
-              · {format(new Date(analysis.dueDateISO), "EEE d MMM yyyy")}
-            </span>
-          )}
-        </div>
+      {hero && (
+        <p className="mt-2 text-[18px] font-semibold leading-snug tracking-tight text-slate-900 dark:text-white sm:text-[19px]">
+          {hero}
+        </p>
+      )}
+
+      {rest && (
+        <p className="mt-2 text-[13px] leading-relaxed text-slate-600 dark:text-slate-400">
+          {rest}
+        </p>
+      )}
+
+      {(analysis.wordCount || analysis.dueDatePhrase) && (
+        <dl className="mt-5 grid gap-3 border-t border-slate-100 pt-4 dark:border-slate-800/80 sm:grid-cols-2">
+          {analysis.dueDatePhrase ? (
+            <FactRow
+              icon={<CalendarIcon size={13} />}
+              label="Due"
+              value={
+                analysis.dueDateISO
+                  ? format(new Date(analysis.dueDateISO), "EEE d MMM yyyy")
+                  : analysis.dueDatePhrase
+              }
+              sub={
+                analysis.dueDateISO && analysis.dueDatePhrase
+                  ? analysis.dueDatePhrase
+                  : undefined
+              }
+            />
+          ) : null}
+          {analysis.wordCount ? (
+            <FactRow
+              icon={<Hash size={13} />}
+              label="Word count"
+              value={`${analysis.wordCount.toLocaleString()}`}
+              sub="words"
+            />
+          ) : null}
+        </dl>
       )}
     </article>
   );
 }
 
-/* -------------------------- Deliverables + requirements ------------------- */
+function FactRow({
+  icon,
+  label,
+  value,
+  sub,
+}: {
+  icon: ReactNode;
+  label: string;
+  value: string;
+  sub?: string;
+}) {
+  return (
+    <div className="flex items-start gap-3">
+      <span className="mt-0.5 inline-flex size-8 shrink-0 items-center justify-center rounded-lg bg-slate-100/80 text-slate-600 ring-1 ring-slate-200/70 dark:bg-slate-800/70 dark:text-slate-300 dark:ring-slate-700/60">
+        {icon}
+      </span>
+      <div className="min-w-0">
+        <dt className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500 dark:text-slate-500">
+          {label}
+        </dt>
+        <dd className="mt-0.5 flex items-baseline gap-1.5">
+          <span className="text-[15px] font-semibold tracking-tight text-slate-900 dark:text-white">
+            {value}
+          </span>
+          {sub && (
+            <span className="text-[11.5px] text-slate-500 dark:text-slate-400">{sub}</span>
+          )}
+        </dd>
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================================
+ * Requirements
+ * ========================================================================== */
 
 function RequirementsCard({
   deliverables,
   requirements,
+  requiredSections,
 }: {
   deliverables: Deliverable[];
   requirements: Requirement[];
+  requiredSections: string[];
 }) {
   return (
-    <article className="relative overflow-hidden rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-[#060e1e]/90">
-      <header className="flex items-center gap-2">
-        <span className="inline-flex size-8 items-center justify-center rounded-xl bg-cyan-100 text-cyan-700 dark:bg-cyan-900/50 dark:text-cyan-200">
-          <ClipboardList size={15} />
-        </span>
-        <div>
-          <p className="text-[10.5px] font-semibold uppercase tracking-[0.16em] text-cyan-700 dark:text-cyan-300">
-            What this assignment requires
-          </p>
-          <h3 className="mt-0.5 text-[16px] font-bold text-slate-900 dark:text-white">
-            Deliverables & constraints
-          </h3>
-        </div>
+    <article className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-[#0a1020]">
+      <header>
+        <p className="text-[10.5px] font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-slate-400">
+          Requirements
+        </p>
+        <h3 className="mt-1 text-[16px] font-semibold tracking-tight text-slate-900 dark:text-white">
+          What this assignment expects
+        </h3>
       </header>
 
-      <div className="mt-4 space-y-3">
-        <div>
-          <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500 dark:text-slate-400">
-            You'll produce
-          </p>
-          <ul className="mt-2 flex flex-wrap gap-2">
-            {deliverables.map((d) => (
-              <li
-                key={d.label}
-                className="inline-flex items-center gap-1.5 rounded-full border border-violet-200 bg-violet-50 px-2.5 py-1 text-[12px] font-semibold text-violet-700 dark:border-violet-800/70 dark:bg-violet-950/30 dark:text-violet-200"
-              >
-                <Target size={11} />
-                {d.label}
-              </li>
-            ))}
-          </ul>
-        </div>
-        <div>
-          <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500 dark:text-slate-400">
-            Expect
-          </p>
+      <div className="mt-5 space-y-6">
+        {/* ───────── Tier 1 · Deliverables (primary) ───────── */}
+        {deliverables.length > 0 && (
+          <Subsection tier="primary" title="You'll produce" caption="Deliverables">
+            <ul className="space-y-2">
+              {deliverables.map((d) => (
+                <li
+                  key={d.label}
+                  className="flex items-start gap-3 rounded-lg border border-slate-200/70 bg-slate-50/60 px-3.5 py-2.5 dark:border-slate-800/80 dark:bg-slate-900/40"
+                >
+                  <span className="mt-0.5 inline-flex size-6 shrink-0 items-center justify-center rounded-md bg-violet-50 text-violet-600 ring-1 ring-violet-200/60 dark:bg-violet-500/10 dark:text-violet-300 dark:ring-violet-500/20">
+                    {iconForDeliverable(d.type)}
+                  </span>
+                  <div className="min-w-0">
+                    <p className="text-[13.5px] font-semibold leading-snug text-slate-900 dark:text-white">
+                      {d.label}
+                    </p>
+                    {d.detail && (
+                      <p className="mt-0.5 text-[12px] leading-snug text-slate-500 dark:text-slate-400">
+                        {d.detail}
+                      </p>
+                    )}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </Subsection>
+        )}
+
+        {/* ───────── Tier 2 · Expectations (secondary) ───────── */}
+        <Subsection tier="secondary" title="What the brief expects" caption="Constraints">
           {requirements.length === 0 ? (
-            <p className="mt-2 text-[13px] text-slate-500 dark:text-slate-400">
-              No explicit constraints detected. Double-check the original brief for word count,
-              formatting, or citation style.
+            <p className="text-[12.5px] text-slate-500 dark:text-slate-400">
+              No explicit constraints detected. Double-check the original brief for word
+              count, formatting, or citation style.
             </p>
           ) : (
-            <ul className="mt-2 space-y-1.5">
+            <ul className="grid gap-2 sm:grid-cols-2">
               {requirements.map((r) => (
                 <li
                   key={r.label}
-                  className="flex items-start gap-2 rounded-lg border border-slate-200 bg-slate-50/60 px-2.5 py-2 text-[12.5px] text-slate-700 dark:border-slate-800 dark:bg-slate-900/40 dark:text-slate-200"
+                  className="flex items-start gap-2.5 rounded-md border border-slate-200/80 bg-white px-3 py-2 text-[12.5px] text-slate-700 dark:border-slate-800/80 dark:bg-slate-900/50 dark:text-slate-200"
                 >
-                  <span className="mt-0.5 inline-flex size-5 shrink-0 items-center justify-center rounded-md bg-white text-slate-600 shadow-sm dark:bg-slate-950 dark:text-slate-300">
+                  <span className="mt-0.5 inline-flex size-5 shrink-0 items-center justify-center rounded-md bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400">
                     {iconForRequirement(r.icon)}
                   </span>
-                  <span>
-                    <span className="font-semibold text-slate-900 dark:text-white">{r.label}</span>
+                  <span className="min-w-0">
+                    <span className="block text-[12.5px] font-semibold leading-tight text-slate-900 dark:text-white">
+                      {r.label}
+                    </span>
                     {r.detail && (
-                      <span className="mt-0.5 block text-[11.5px] text-slate-500 dark:text-slate-400">
+                      <span className="mt-0.5 block text-[11.5px] leading-snug text-slate-500 dark:text-slate-400">
                         {r.detail}
                       </span>
                     )}
@@ -777,10 +1194,86 @@ function RequirementsCard({
               ))}
             </ul>
           )}
-        </div>
+        </Subsection>
+
+        {/* ───────── Tier 3 · Likely sections (tertiary) ───────── */}
+        {requiredSections.length > 0 && (
+          <Subsection
+            tier="tertiary"
+            title="Likely sections in your artefact"
+            caption="Structure hints"
+          >
+            <ul className="flex flex-wrap gap-1.5">
+              {requiredSections.map((s) => (
+                <li
+                  key={s}
+                  className="rounded-full border border-slate-200/80 bg-slate-50 px-2.5 py-0.5 text-[11px] font-medium text-slate-600 dark:border-slate-800 dark:bg-slate-900/60 dark:text-slate-300"
+                >
+                  {s}
+                </li>
+              ))}
+            </ul>
+          </Subsection>
+        )}
       </div>
     </article>
   );
+}
+
+function Subsection({
+  title,
+  caption,
+  tier,
+  children,
+}: {
+  title: string;
+  caption?: string;
+  tier: "primary" | "secondary" | "tertiary";
+  children: ReactNode;
+}) {
+  const titleClass =
+    tier === "primary"
+      ? "text-[14px] font-semibold tracking-tight text-slate-900 dark:text-white"
+      : tier === "secondary"
+      ? "text-[13px] font-semibold text-slate-800 dark:text-slate-100"
+      : "text-[12px] font-semibold text-slate-600 dark:text-slate-300";
+  return (
+    <div>
+      <div className="flex items-baseline justify-between gap-3">
+        <h4 className={titleClass}>{title}</h4>
+        {caption && (
+          <span className="text-[9.5px] font-semibold uppercase tracking-[0.16em] text-slate-400 dark:text-slate-500">
+            {caption}
+          </span>
+        )}
+      </div>
+      <div className="mt-2.5">{children}</div>
+    </div>
+  );
+}
+
+function iconForDeliverable(type: Deliverable["type"]) {
+  switch (type) {
+    case "report":
+    case "analysis":
+      return <FileText size={13} />;
+    case "essay":
+      return <PenLine size={13} />;
+    case "presentation":
+      return <Target size={13} />;
+    case "research":
+      return <BookOpen size={13} />;
+    case "code":
+      return <Layers size={13} />;
+    case "reflection":
+      return <SquarePen size={13} />;
+    case "quiz":
+      return <ListChecks size={13} />;
+    case "group":
+      return <GraduationCap size={13} />;
+    default:
+      return <ClipboardList size={13} />;
+  }
 }
 
 function iconForRequirement(icon: RequirementIcon) {
@@ -802,146 +1295,395 @@ function iconForRequirement(icon: RequirementIcon) {
   }
 }
 
-/* ------------------------------- Action plan ----------------------------- */
+/* ============================================================================
+ * Rubric
+ * ========================================================================== */
 
-function ActionPlanCard({
-  stages,
-  includedStageIds,
-  onToggleStage,
-  onRemoveSubtask,
-  onUpdateSubtask,
-}: {
-  stages: PlanStage[];
-  includedStageIds: Set<string>;
-  onToggleStage: (id: string) => void;
-  onRemoveSubtask: (stageId: string, index: number) => void;
-  onUpdateSubtask: (stageId: string, index: number, value: string) => void;
-}) {
+function RubricCard({ signals }: { signals: RubricSignal[] }) {
   return (
-    <article className="relative overflow-hidden rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-[#060e1e]/90">
+    <article className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-[#0a1020]">
       <header className="flex flex-wrap items-end justify-between gap-3">
-        <div className="min-w-0">
-          <p className="flex items-center gap-2 text-[10.5px] font-semibold uppercase tracking-[0.16em] text-emerald-700 dark:text-emerald-300">
-            <span className="inline-flex size-6 items-center justify-center rounded-md bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-200">
-              <Layers size={11} />
-            </span>
-            Action plan
+        <div>
+          <p className="text-[10.5px] font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-slate-400">
+            Rubric interpretation
           </p>
-          <h3 className="mt-1 text-[17px] font-bold tracking-tight text-slate-900 dark:text-white">
-            How a high-performing student would tackle this
+          <h3 className="mt-1 text-[16px] font-semibold tracking-tight text-slate-900 dark:text-white">
+            How the marker will read your work
           </h3>
-          <p className="mt-1 max-w-2xl text-[12.5px] text-slate-600 dark:text-slate-300">
-            Every stage is editable. Deselect anything that doesn't fit your brief, tweak the
-            subtasks, and StudySprint will turn whatever you keep into a real assignment with
-            subtasks below.
-          </p>
         </div>
-        <p className="text-[11.5px] font-semibold text-slate-500 dark:text-slate-400">
-          {includedStageIds.size} of {stages.length} stages included
+        <p className="text-[11px] font-medium text-slate-500 dark:text-slate-400">
+          <span className="tabular-nums text-slate-800 dark:text-slate-200">
+            {signals.length}
+          </span>{" "}
+          criteria detected
         </p>
       </header>
 
-      <ol className="mt-5 space-y-3">
-        {stages.map((stage, index) => (
-          <StageRow
-            key={stage.id}
-            index={index}
-            stage={stage}
-            included={includedStageIds.has(stage.id)}
-            onToggle={() => onToggleStage(stage.id)}
-            onRemoveSubtask={(i) => onRemoveSubtask(stage.id, i)}
-            onUpdateSubtask={(i, v) => onUpdateSubtask(stage.id, i, v)}
-          />
+      <ol className="mt-5 space-y-2.5">
+        {signals.map((s, i) => (
+          <li
+            key={s.criterion}
+            className="group relative flex gap-4 rounded-xl border border-slate-200/80 bg-slate-50/40 px-4 py-3.5 transition-colors hover:border-slate-300/80 hover:bg-slate-50/70 dark:border-slate-800/80 dark:bg-slate-900/30 dark:hover:border-slate-700 dark:hover:bg-slate-900/50"
+          >
+            <span className="flex flex-col items-center">
+              <span className="inline-flex size-7 items-center justify-center rounded-md bg-white text-[11px] font-semibold tabular-nums text-slate-600 ring-1 ring-slate-200 dark:bg-slate-900 dark:text-slate-300 dark:ring-slate-700">
+                {String(i + 1).padStart(2, "0")}
+              </span>
+            </span>
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5">
+                <p className="text-[14px] font-semibold tracking-tight text-slate-900 dark:text-white">
+                  {s.criterion}
+                </p>
+                {s.weight && (
+                  <span className="inline-flex items-center gap-1 rounded-full bg-violet-50 px-2 py-0.5 text-[10.5px] font-semibold tabular-nums text-violet-700 ring-1 ring-violet-200/60 dark:bg-violet-500/10 dark:text-violet-300 dark:ring-violet-500/20">
+                    <Target size={9} />
+                    {s.weight}
+                  </span>
+                )}
+              </div>
+              {s.guidance && (
+                <p className="mt-1.5 text-[12.5px] leading-relaxed text-slate-600 dark:text-slate-400">
+                  {s.guidance}
+                </p>
+              )}
+            </div>
+          </li>
         ))}
       </ol>
     </article>
   );
 }
 
-function StageRow({
-  index,
+/* ============================================================================
+ * Action plan — split workspace
+ * ========================================================================== */
+
+function ActionPlanWorkspace({
+  stages,
+  selectedStageId,
+  setSelectedStageId,
+  selectedStage,
+  includedStageIds,
+  onToggleStage,
+  onRemoveSubtask,
+  onUpdateSubtask,
+  onAddSubtask,
+}: {
+  stages: PlanStage[];
+  selectedStageId: string | null;
+  setSelectedStageId: (id: string) => void;
+  selectedStage: PlanStage | null;
+  includedStageIds: Set<string>;
+  onToggleStage: (id: string) => void;
+  onRemoveSubtask: (stageId: string, index: number) => void;
+  onUpdateSubtask: (stageId: string, index: number, value: string) => void;
+  onAddSubtask: (stageId: string) => void;
+}) {
+  return (
+    <article className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-[#0a1020]">
+      <header className="flex flex-wrap items-end justify-between gap-3 border-b border-slate-100 p-6 pb-4 dark:border-slate-800/80">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 text-[10.5px] font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-slate-400">
+            <span className="inline-flex size-4 items-center justify-center rounded-sm bg-violet-100/80 text-violet-600 dark:bg-violet-500/15 dark:text-violet-300">
+              <Flag size={10} />
+            </span>
+            Action plan
+          </div>
+          <h3 className="mt-1 text-[16px] font-semibold tracking-tight text-slate-900 dark:text-white">
+            Work through each stage
+          </h3>
+          <p className="mt-1 max-w-md text-[12.5px] text-slate-500 dark:text-slate-400">
+            Pick a stage to inspect and edit its subtasks. Only included stages are
+            converted into the assignment.
+          </p>
+        </div>
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50/70 px-3 py-1.5 text-[11px] font-medium text-slate-600 dark:border-slate-800 dark:bg-slate-900/50 dark:text-slate-300">
+            <span className="inline-flex size-1.5 rounded-full bg-violet-500 dark:bg-violet-400" />
+            <span>
+              <span className="tabular-nums text-slate-900 dark:text-white">
+                {includedStageIds.size}
+              </span>{" "}
+              of{" "}
+              <span className="tabular-nums">{stages.length}</span> included
+            </span>
+          </div>
+        </div>
+      </header>
+
+      <div className="grid md:grid-cols-[minmax(0,288px)_minmax(0,1fr)]">
+        {/* ───────── Stage list ───────── */}
+        <ol className="max-h-[480px] overflow-y-auto bg-slate-50/30 p-2 md:border-r md:border-slate-100 dark:bg-slate-950/40 dark:md:border-slate-800/80">
+          {stages.map((stage, index) => {
+            const included = includedStageIds.has(stage.id);
+            const active = selectedStageId === stage.id;
+            const theme = phaseTheme(stage.phaseId);
+            return (
+              <li key={stage.id} className="mb-1 last:mb-0">
+                <button
+                  type="button"
+                  onClick={() => setSelectedStageId(stage.id)}
+                  className={cn(
+                    "group relative flex w-full items-start gap-3 overflow-hidden rounded-lg px-3 py-2.5 text-left transition-colors",
+                    active
+                      ? "bg-white shadow-[0_1px_0_0_rgba(15,23,42,0.04)] ring-1 ring-violet-300/80 dark:bg-slate-900/70 dark:ring-violet-500/40"
+                      : "hover:bg-white/70 dark:hover:bg-slate-900/50",
+                  )}
+                >
+                  {/* Active rail */}
+                  <span
+                    aria-hidden
+                    className={cn(
+                      "absolute inset-y-1 left-0 w-[3px] rounded-full transition-opacity",
+                      theme.bar,
+                      active ? "opacity-100" : "opacity-0 group-hover:opacity-50",
+                    )}
+                  />
+
+                  <span
+                    className={cn(
+                      "mt-0.5 inline-flex size-6 shrink-0 items-center justify-center rounded-md text-[11px] font-semibold tabular-nums ring-1 transition-colors",
+                      included
+                        ? "bg-violet-600 text-white ring-violet-500 dark:bg-violet-500 dark:ring-violet-400/60"
+                        : "bg-white text-slate-500 ring-slate-200 dark:bg-slate-900 dark:text-slate-400 dark:ring-slate-700",
+                    )}
+                  >
+                    {String(index + 1).padStart(2, "0")}
+                  </span>
+
+                  <span className="min-w-0 flex-1">
+                    <span
+                      className={cn(
+                        "block text-[13px] font-semibold leading-tight",
+                        active
+                          ? "text-slate-900 dark:text-white"
+                          : "text-slate-700 dark:text-slate-200",
+                      )}
+                    >
+                      {stage.title}
+                    </span>
+                    <span className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10.5px]">
+                      <span
+                        className={cn(
+                          "inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 font-semibold uppercase tracking-wider",
+                          theme.chip,
+                          theme.text,
+                        )}
+                      >
+                        <span className={cn("size-1 rounded-full", theme.dot)} />
+                        {theme.label}
+                      </span>
+                      <span className="text-slate-500 dark:text-slate-500">
+                        <span className="tabular-nums">{stage.subtasks.length}</span>{" "}
+                        subtask{stage.subtasks.length === 1 ? "" : "s"}
+                      </span>
+                      {!included && (
+                        <span className="text-slate-400 dark:text-slate-600">· Excluded</span>
+                      )}
+                    </span>
+                  </span>
+
+                  <ChevronRight
+                    size={13}
+                    className={cn(
+                      "mt-1 shrink-0 transition-colors",
+                      active
+                        ? "text-violet-600 dark:text-violet-300"
+                        : "text-slate-300 dark:text-slate-700",
+                    )}
+                  />
+                </button>
+              </li>
+            );
+          })}
+        </ol>
+
+        {/* ───────── Stage detail ───────── */}
+        <div className="min-h-[320px] p-6">
+          {selectedStage ? (
+            <StageDetail
+              stage={selectedStage}
+              included={includedStageIds.has(selectedStage.id)}
+              onToggle={() => onToggleStage(selectedStage.id)}
+              onRemoveSubtask={(i) => onRemoveSubtask(selectedStage.id, i)}
+              onUpdateSubtask={(i, v) => onUpdateSubtask(selectedStage.id, i, v)}
+              onAddSubtask={() => onAddSubtask(selectedStage.id)}
+            />
+          ) : (
+            <p className="text-[12.5px] text-slate-500 dark:text-slate-400">
+              Select a stage to see its details.
+            </p>
+          )}
+        </div>
+      </div>
+    </article>
+  );
+}
+
+function StageDetail({
   stage,
   included,
   onToggle,
   onRemoveSubtask,
   onUpdateSubtask,
+  onAddSubtask,
 }: {
-  index: number;
   stage: PlanStage;
   included: boolean;
   onToggle: () => void;
   onRemoveSubtask: (index: number) => void;
   onUpdateSubtask: (index: number, value: string) => void;
+  onAddSubtask: () => void;
 }) {
+  const theme = phaseTheme(stage.phaseId);
   return (
-    <li
-      className={cn(
-        "group relative rounded-2xl border p-4 transition-all",
-        included
-          ? "border-emerald-200/80 bg-emerald-50/40 shadow-sm dark:border-emerald-900/50 dark:bg-emerald-950/15"
-          : "border-dashed border-slate-300 bg-slate-50/60 opacity-75 dark:border-slate-700 dark:bg-slate-900/30",
-      )}
-    >
-      <div className="flex items-start gap-3">
+    <div className="group flex h-full flex-col">
+      {/* Phase identity strip */}
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div
+            className={cn(
+              "inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em]",
+              theme.chip,
+              theme.text,
+            )}
+          >
+            <span className={cn("inline-flex", theme.text)}>{theme.icon}</span>
+            {theme.label} phase
+          </div>
+          <h4 className="mt-2 text-[17px] font-semibold leading-tight tracking-tight text-slate-900 dark:text-white">
+            {stage.title}
+          </h4>
+          {stage.description && (
+            <p className="mt-1.5 max-w-xl text-[12.5px] leading-relaxed text-slate-500 dark:text-slate-400">
+              {stage.description}
+            </p>
+          )}
+        </div>
+
         <button
           type="button"
           onClick={onToggle}
           className={cn(
-            "mt-0.5 inline-flex size-7 shrink-0 items-center justify-center rounded-lg text-[11px] font-bold ring-1 transition-colors",
+            "inline-flex shrink-0 items-center gap-1.5 rounded-md border px-2.5 py-1 text-[11.5px] font-semibold transition-colors",
             included
-              ? "bg-emerald-500 text-white ring-emerald-500/30 hover:bg-emerald-600"
-              : "bg-white text-slate-500 ring-slate-300 hover:bg-slate-100 dark:bg-slate-900 dark:ring-slate-700 dark:hover:bg-slate-800",
+              ? "border-violet-300/80 bg-violet-50 text-violet-700 hover:bg-violet-100 dark:border-violet-500/30 dark:bg-violet-500/15 dark:text-violet-200 dark:hover:bg-violet-500/25"
+              : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900/60 dark:text-slate-300 dark:hover:bg-slate-900",
           )}
           aria-pressed={included}
-          aria-label={included ? "Exclude stage from plan" : "Include stage in plan"}
         >
-          {included ? <CheckCircle2 size={14} /> : index + 1}
+          {included ? <CheckCircle2 size={12} /> : <Plus size={12} className="rotate-45" />}
+          {included ? "Included" : "Excluded"}
         </button>
-        <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-2">
-            <h4 className="text-[14px] font-bold tracking-tight text-slate-900 dark:text-white">
-              {stage.title}
-            </h4>
-            <span className="rounded-full bg-slate-200/70 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-600 dark:bg-slate-800 dark:text-slate-300">
-              {stage.phaseId}
-            </span>
-          </div>
-          <p className="mt-0.5 text-[12.5px] leading-relaxed text-slate-600 dark:text-slate-300">
-            {stage.description}
-          </p>
-
-          {stage.subtasks.length > 0 && (
-            <ul className="mt-3 space-y-1.5">
-              {stage.subtasks.map((task, i) => (
-                <li key={`${stage.id}-${i}`} className="flex items-center gap-2">
-                  <span className="inline-flex size-4 shrink-0 items-center justify-center rounded-sm border border-slate-300 bg-white text-[9px] text-slate-500 dark:border-slate-600 dark:bg-slate-900">
-                    ○
-                  </span>
-                  <input
-                    type="text"
-                    value={task}
-                    onChange={(e) => onUpdateSubtask(i, e.target.value)}
-                    className="min-w-0 flex-1 rounded-md border border-transparent bg-transparent px-1.5 py-1 text-[12.5px] text-slate-700 transition-colors hover:border-slate-200 focus:border-emerald-300 focus:bg-white focus:outline-none dark:text-slate-200 dark:hover:border-slate-700 dark:focus:border-emerald-700 dark:focus:bg-slate-900"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => onRemoveSubtask(i)}
-                    className="shrink-0 rounded-md px-1.5 py-0.5 text-[11px] font-medium text-slate-400 opacity-0 transition hover:bg-slate-100 hover:text-rose-600 focus:opacity-100 group-hover:opacity-100 dark:hover:bg-slate-800"
-                    aria-label="Remove subtask"
-                  >
-                    Remove
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
       </div>
-    </li>
+
+      {/* Subtasks */}
+      <div className="mt-5 border-t border-slate-100 pt-4 dark:border-slate-800/80">
+        <div className="flex items-baseline justify-between">
+          <p className="text-[10.5px] font-semibold uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">
+            Subtasks
+          </p>
+          <p className="text-[11px] text-slate-400 dark:text-slate-500">
+            <span className="tabular-nums text-slate-600 dark:text-slate-300">
+              {stage.subtasks.length}
+            </span>{" "}
+            item{stage.subtasks.length === 1 ? "" : "s"}
+          </p>
+        </div>
+
+        {stage.subtasks.length === 0 ? (
+          <p className="mt-3 rounded-md border border-dashed border-slate-200 px-3 py-3 text-[12.5px] text-slate-500 dark:border-slate-800 dark:text-slate-400">
+            No subtasks yet. Add one below if you want to break this stage down.
+          </p>
+        ) : (
+          <ul className="mt-3 space-y-1.5">
+            {stage.subtasks.map((task, i) => (
+              <li
+                key={`${stage.id}-${i}`}
+                className="flex items-center gap-2.5 rounded-md px-1.5 py-0.5 transition-colors hover:bg-slate-50 dark:hover:bg-slate-900/50"
+              >
+                <span className="inline-flex size-4 shrink-0 items-center justify-center rounded-sm border border-slate-300 bg-white text-[9px] text-slate-400 dark:border-slate-600 dark:bg-slate-900">
+                  ○
+                </span>
+                <input
+                  type="text"
+                  value={task}
+                  onChange={(e) => onUpdateSubtask(i, e.target.value)}
+                  className="min-w-0 flex-1 rounded-md border border-transparent bg-transparent px-2 py-1.5 text-[13px] leading-snug text-slate-800 transition-colors hover:border-slate-200 focus:border-violet-300 focus:bg-white focus:outline-none dark:text-slate-100 dark:hover:border-slate-700 dark:focus:border-violet-500/50 dark:focus:bg-slate-900"
+                />
+                <button
+                  type="button"
+                  onClick={() => onRemoveSubtask(i)}
+                  className="shrink-0 rounded p-1 text-slate-400 opacity-0 transition hover:bg-slate-100 hover:text-rose-600 focus:opacity-100 group-hover:opacity-100 dark:hover:bg-slate-800"
+                  aria-label="Remove subtask"
+                >
+                  <Trash2 size={12} />
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+        <button
+          type="button"
+          onClick={onAddSubtask}
+          className="mt-3 inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[11.5px] font-medium text-slate-500 transition-colors hover:bg-slate-100 hover:text-violet-700 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-violet-200"
+        >
+          <Plus size={11} /> Add subtask
+        </button>
+      </div>
+    </div>
   );
 }
 
-/* -------------------------------- Timeline ------------------------------- */
+/* ============================================================================
+ * High-mark tips — editorial list
+ * ========================================================================== */
+
+function HighMarkCard({ tips }: { tips: string[] }) {
+  return (
+    <article className="relative overflow-hidden rounded-2xl border border-amber-200/70 bg-gradient-to-b from-amber-50/50 to-white p-6 shadow-sm dark:border-amber-500/15 dark:from-amber-500/[0.05] dark:to-[#0a1020]">
+      <header className="flex items-center gap-2.5">
+        <span className="inline-flex size-8 items-center justify-center rounded-lg bg-amber-100 text-amber-700 ring-1 ring-amber-200/80 dark:bg-amber-400/15 dark:text-amber-200 dark:ring-amber-400/30">
+          <Lightbulb size={14} />
+        </span>
+        <div className="min-w-0">
+          <p className="text-[10.5px] font-semibold uppercase tracking-[0.18em] text-amber-700 dark:text-amber-300">
+            High-mark focus
+          </p>
+          <h3 className="text-[15.5px] font-semibold tracking-tight text-slate-900 dark:text-white">
+            How stronger students approach this
+          </h3>
+        </div>
+      </header>
+
+      <p className="mt-3 max-w-2xl text-[12.5px] leading-relaxed text-slate-600 dark:text-slate-400">
+        Faculty-style guidance drawn from common rubric expectations. Treat these
+        as directional — verify against your lecturer&apos;s stated criteria.
+      </p>
+
+      <ol className="mt-4 grid gap-2.5 sm:grid-cols-2">
+        {tips.map((t, i) => (
+          <li
+            key={t}
+            className="group flex items-start gap-3 rounded-xl border border-slate-200/70 bg-white/60 px-3.5 py-3 shadow-[0_1px_0_0_rgba(15,23,42,0.03)] transition-colors hover:border-amber-200/80 dark:border-slate-800/80 dark:bg-slate-900/40 dark:hover:border-amber-500/25"
+          >
+            <span className="inline-flex size-6 shrink-0 items-center justify-center rounded-md bg-amber-50 text-[11px] font-semibold tabular-nums text-amber-700 ring-1 ring-amber-200/70 dark:bg-amber-400/15 dark:text-amber-200 dark:ring-amber-400/25">
+              {String(i + 1).padStart(2, "0")}
+            </span>
+            <p className="text-[12.5px] leading-relaxed text-slate-700 dark:text-slate-200">
+              {t}
+            </p>
+          </li>
+        ))}
+      </ol>
+    </article>
+  );
+}
+
+/* ============================================================================
+ * Timeline (full)
+ * ========================================================================== */
 
 function TimelineCard({
   phases,
@@ -950,99 +1692,278 @@ function TimelineCard({
   phases: NonNullable<ReturnType<typeof projectTimeline>>;
   dueDateISO?: string;
 }) {
-  const toneForIndex = (i: number) =>
-    [
-      "from-violet-500/80 to-violet-600",
-      "from-fuchsia-500/80 to-fuchsia-600",
-      "from-blue-500/80 to-blue-600",
-      "from-cyan-500/80 to-cyan-600",
-      "from-emerald-500/80 to-emerald-600",
-    ][i % 5];
-
   return (
-    <article className="relative overflow-hidden rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-[#060e1e]/90">
+    <article className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-[#0a1020]">
       <header className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <p className="flex items-center gap-2 text-[10.5px] font-semibold uppercase tracking-[0.16em] text-blue-700 dark:text-blue-300">
-            <span className="inline-flex size-6 items-center justify-center rounded-md bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-200">
-              <CalendarIcon size={11} />
+          <div className="flex items-center gap-2 text-[10.5px] font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-slate-400">
+            <span className="inline-flex size-4 items-center justify-center rounded-sm bg-violet-100/80 text-violet-600 dark:bg-violet-500/15 dark:text-violet-300">
+              <CalendarIcon size={10} />
             </span>
             Suggested pacing
-          </p>
-          <h3 className="mt-1 text-[17px] font-bold tracking-tight text-slate-900 dark:text-white">
-            From now to submission
+          </div>
+          <h3 className="mt-1 text-[16px] font-semibold tracking-tight text-slate-900 dark:text-white">
+            From today to submission
           </h3>
-          <p className="mt-1 max-w-2xl text-[12.5px] text-slate-600 dark:text-slate-300">
-            A calm rhythm helps you avoid last-minute panic. These are suggested windows — you
-            can slide your own work into the pattern that fits.
-          </p>
         </div>
         {dueDateISO && (
-          <p className="text-[11.5px] font-semibold text-slate-500 dark:text-slate-400">
-            Submit by {format(new Date(dueDateISO), "EEE d MMM")}
+          <p className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50/70 px-3 py-1.5 text-[11.5px] font-medium text-slate-600 dark:border-slate-800 dark:bg-slate-900/50 dark:text-slate-300">
+            <Flag size={11} className="text-violet-500 dark:text-violet-300" />
+            Submit by{" "}
+            <span className="text-slate-900 dark:text-white">
+              {format(new Date(dueDateISO), "EEE d MMM")}
+            </span>
           </p>
         )}
       </header>
 
-      <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-        {phases.map((phase, i) => (
-          <div
-            key={phase.id}
-            className="relative overflow-hidden rounded-2xl border border-slate-200/80 bg-gradient-to-b from-white to-slate-50/40 p-3.5 shadow-sm dark:border-slate-800 dark:from-slate-900/60 dark:to-slate-900/20"
-          >
-            <span
-              className={cn(
-                "absolute inset-x-0 top-0 h-1 bg-gradient-to-r",
-                toneForIndex(i),
-              )}
-            />
-            <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-500 dark:text-slate-400">
-              Phase {i + 1}
-            </p>
-            <h4 className="mt-1 text-[14px] font-bold text-slate-900 dark:text-white">
-              {phase.label}
-            </h4>
-            <p className="mt-1 text-[11.5px] leading-snug text-slate-600 dark:text-slate-300">
-              {phase.description}
-            </p>
-            <p className="mt-3 text-[11px] font-semibold tabular-nums text-slate-700 dark:text-slate-200">
-              {phase.startLabel} → {phase.endLabel}
-            </p>
-          </div>
-        ))}
-      </div>
+      <ol className="mt-5 grid gap-3 md:grid-cols-5">
+        {phases.map((phase) => {
+          const theme = phaseTheme(phase.id);
+          return (
+            <li
+              key={phase.id}
+              className="relative flex flex-col rounded-xl border border-slate-200/80 bg-slate-50/40 p-3.5 dark:border-slate-800/80 dark:bg-slate-900/30"
+            >
+              <span
+                aria-hidden
+                className={cn(
+                  "absolute inset-x-3 top-0 h-[2px] rounded-full",
+                  theme.bar,
+                )}
+              />
+              <span
+                className={cn(
+                  "inline-flex w-max items-center gap-1 rounded-full px-1.5 py-0.5 text-[9.5px] font-semibold uppercase tracking-[0.14em]",
+                  theme.chip,
+                  theme.text,
+                )}
+              >
+                <span className={theme.text}>{theme.icon}</span>
+                {theme.label}
+              </span>
+              <p className="mt-2 text-[13.5px] font-semibold leading-tight tracking-tight text-slate-900 dark:text-white">
+                {phase.label}
+              </p>
+              <p className="mt-1 line-clamp-3 text-[11.5px] leading-snug text-slate-500 dark:text-slate-400">
+                {phase.description}
+              </p>
+              <p className="mt-auto pt-3 text-[11px] font-medium tabular-nums text-slate-600 dark:text-slate-300">
+                <span className="text-slate-400 dark:text-slate-500">{phase.startLabel}</span>
+                <span className="mx-1 text-slate-300 dark:text-slate-700">→</span>
+                <span>{phase.endLabel}</span>
+              </p>
+            </li>
+          );
+        })}
+      </ol>
     </article>
   );
 }
 
-/* ------------------------------ High-mark tips --------------------------- */
+/* ============================================================================
+ * Ethical note
+ * ========================================================================== */
 
-function HighMarkCard({ tips }: { tips: string[] }) {
+function EthicalNote({ source, model }: { source: BriefAnalysis["source"]; model?: string }) {
   return (
-    <article className="relative overflow-hidden rounded-2xl border border-amber-200/70 bg-gradient-to-br from-amber-50/70 via-white to-rose-50/40 p-5 shadow-sm dark:border-amber-900/40 dark:from-amber-950/20 dark:via-[#060e1e] dark:to-rose-950/15">
-      <header className="flex items-center gap-2">
-        <span className="inline-flex size-8 items-center justify-center rounded-xl bg-amber-100 text-amber-700 dark:bg-amber-900/50 dark:text-amber-200">
-          <Lightbulb size={15} />
-        </span>
-        <div>
-          <p className="text-[10.5px] font-semibold uppercase tracking-[0.16em] text-amber-700 dark:text-amber-300">
-            High-mark focus
-          </p>
-          <h3 className="mt-0.5 text-[16px] font-bold text-slate-900 dark:text-white">
-            What stronger students tend to do
-          </h3>
-        </div>
-      </header>
-      <ul className="mt-4 grid gap-2 sm:grid-cols-2">
-        {tips.map((t) => (
-          <li
-            key={t}
-            className="flex items-start gap-2 rounded-xl border border-white/80 bg-white/90 p-3 text-[13px] leading-relaxed text-slate-700 shadow-sm dark:border-slate-800 dark:bg-[#050d1b]/80 dark:text-slate-200"
-          >
-            <span className="mt-0.5 inline-flex size-5 shrink-0 items-center justify-center rounded-md bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-200">
-              <Sparkles size={11} />
+    <p className="flex items-start gap-2 pt-2 text-[11.5px] leading-relaxed text-slate-500 dark:text-slate-500">
+      <ShieldCheck size={12} className="mt-0.5 shrink-0 text-emerald-600/80 dark:text-emerald-400/70" />
+      <span>
+        <span className="font-medium text-slate-600 dark:text-slate-400">
+          StudySprint helps interpret briefs — it doesn&apos;t replace your academic thinking.
+        </span>{" "}
+        Verify every field against your official brief and rubric, and follow your
+        institution&apos;s academic integrity policies.
+        {source === "llm" && model && (
+          <span className="text-slate-400 dark:text-slate-600">
+            {" · "}
+            Plan generated with AI assistance ({model})
+          </span>
+        )}
+      </span>
+    </p>
+  );
+}
+
+/* ============================================================================
+ * Right rail — status
+ * ========================================================================== */
+
+function RailCard({
+  title,
+  caption,
+  children,
+  className,
+}: {
+  title: string;
+  caption?: ReactNode;
+  children: ReactNode;
+  className?: string;
+}) {
+  return (
+    <article
+      className={cn(
+        "rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-[#0a1020]",
+        className,
+      )}
+    >
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-slate-400">
+          {title}
+        </p>
+        {caption && <span className="text-[10px] text-slate-400 dark:text-slate-500">{caption}</span>}
+      </div>
+      <div className="mt-3">{children}</div>
+    </article>
+  );
+}
+
+function StatusCard({ analysis }: { analysis: BriefAnalysis }) {
+  const confLabel =
+    analysis.confidence === "high"
+      ? "High"
+      : analysis.confidence === "medium"
+      ? "Medium"
+      : "Low";
+  const confDot =
+    analysis.confidence === "high"
+      ? "bg-emerald-500"
+      : analysis.confidence === "medium"
+      ? "bg-amber-500"
+      : "bg-slate-400";
+
+  return (
+    <RailCard title="Status">
+      <dl className="space-y-2 text-[12.5px]">
+        <RailRow label="Confidence">
+          <span className="inline-flex items-center gap-1.5 font-medium text-slate-800 dark:text-slate-100">
+            <span className={cn("size-1.5 rounded-full", confDot)} />
+            {confLabel}
+          </span>
+        </RailRow>
+        <RailRow label="Source">
+          <span className="font-medium text-slate-800 dark:text-slate-100">
+            {analysis.source === "llm" ? analysis.model ?? "LLM" : "On-device"}
+          </span>
+        </RailRow>
+        {analysis.dueDatePhrase && (
+          <RailRow label="Due">
+            <span className="font-medium text-slate-800 dark:text-slate-100">
+              {analysis.dueDateISO
+                ? format(new Date(analysis.dueDateISO), "EEE d MMM")
+                : analysis.dueDatePhrase}
             </span>
-            {t}
+          </RailRow>
+        )}
+        {analysis.wordCount && (
+          <RailRow label="Word count">
+            <span className="font-medium tabular-nums text-slate-800 dark:text-slate-100">
+              {analysis.wordCount.toLocaleString()}
+            </span>
+          </RailRow>
+        )}
+        {analysis.estimatedHours && (
+          <RailRow label="Est. effort">
+            <span className="inline-flex items-center gap-1 font-medium tabular-nums text-slate-800 dark:text-slate-100">
+              <Hourglass size={10} className="text-slate-400" />~{analysis.estimatedHours}h
+            </span>
+          </RailRow>
+        )}
+      </dl>
+    </RailCard>
+  );
+}
+
+function RailRow({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="flex items-center justify-between gap-3">
+      <dt className="text-slate-500 dark:text-slate-400">{label}</dt>
+      <dd>{children}</dd>
+    </div>
+  );
+}
+
+/* --------------- Signals (rail) ------------------------------------------ */
+
+function SignalsCard({ signals }: { signals: FieldSignals }) {
+  const entries: Array<{ key: keyof FieldSignals; label: string }> = [
+    { key: "dueDate", label: "Due date" },
+    { key: "wordCount", label: "Word count" },
+    { key: "rubric", label: "Rubric" },
+    { key: "references", label: "References" },
+    { key: "submission", label: "Submission" },
+  ];
+  const confirmed = entries.filter((e) => signals[e.key] === "confirmed").length;
+  return (
+    <RailCard
+      title="Detected signals"
+      caption={
+        <span className="tabular-nums">
+          <span className="text-slate-700 dark:text-slate-200">{confirmed}</span>
+          <span className="text-slate-400 dark:text-slate-500">/{entries.length}</span>
+        </span>
+      }
+    >
+      <ul className="divide-y divide-slate-100 text-[12.5px] dark:divide-slate-800/80">
+        {entries.map((e) => (
+          <SignalRow key={e.key} label={e.label} state={signals[e.key]} />
+        ))}
+      </ul>
+    </RailCard>
+  );
+}
+
+function SignalRow({ label, state }: { label: string; state: SignalConfidence }) {
+  const dot =
+    state === "confirmed"
+      ? "bg-emerald-500"
+      : state === "inferred"
+      ? "bg-amber-500"
+      : "bg-slate-300 dark:bg-slate-700";
+  const text =
+    state === "confirmed" ? "Detected" : state === "inferred" ? "Inferred" : "Missing";
+  const textClass =
+    state === "confirmed"
+      ? "text-emerald-700 dark:text-emerald-300"
+      : state === "inferred"
+      ? "text-amber-700 dark:text-amber-300"
+      : "text-slate-400 dark:text-slate-500";
+  return (
+    <li className="flex items-center justify-between gap-3 py-2 first:pt-0 last:pb-0">
+      <span className="inline-flex items-center gap-2 text-slate-700 dark:text-slate-200">
+        <span className={cn("size-1.5 rounded-full", dot)} />
+        {label}
+      </span>
+      <span className={cn("text-[10.5px] font-semibold uppercase tracking-wider", textClass)}>
+        {text}
+      </span>
+    </li>
+  );
+}
+
+/* --------------- Missing details (rail) ---------------------------------- */
+
+function MissingDetailsCard({ items }: { items: string[] }) {
+  return (
+    <article className="relative overflow-hidden rounded-xl border border-amber-200/70 bg-amber-50/40 p-4 shadow-sm dark:border-amber-500/20 dark:bg-amber-500/[0.05]">
+      <span
+        aria-hidden
+        className="absolute inset-y-0 left-0 w-[3px] bg-amber-400/80 dark:bg-amber-400/60"
+      />
+      <header className="flex items-center gap-2">
+        <span className="inline-flex size-6 items-center justify-center rounded-md bg-amber-100 text-amber-700 ring-1 ring-amber-200/70 dark:bg-amber-400/15 dark:text-amber-200 dark:ring-amber-400/30">
+          <AlertCircle size={11} />
+        </span>
+        <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-amber-800 dark:text-amber-300">
+          Confirm with your lecturer
+        </p>
+      </header>
+      <ul className="mt-3 space-y-2 text-[12.5px] leading-snug text-amber-900 dark:text-amber-100">
+        {items.map((item) => (
+          <li key={item} className="flex items-start gap-2">
+            <span className="mt-[7px] inline-block size-[5px] shrink-0 rounded-full bg-amber-500/90 dark:bg-amber-300" />
+            <span>{item}</span>
           </li>
         ))}
       </ul>
@@ -1050,9 +1971,52 @@ function HighMarkCard({ tips }: { tips: string[] }) {
   );
 }
 
-/* -------------------------------- Convert -------------------------------- */
+/* --------------- Pacing summary (rail) ----------------------------------- */
 
-function ConvertCard({
+function PacingRailCard({
+  phases,
+  dueDateISO,
+}: {
+  phases: NonNullable<ReturnType<typeof projectTimeline>>;
+  dueDateISO?: string;
+}) {
+  return (
+    <RailCard title="Pacing">
+      <ol className="space-y-2 text-[12.5px]">
+        {phases.map((phase) => {
+          const theme = phaseTheme(phase.id);
+          return (
+            <li key={phase.id} className="flex items-start gap-2.5">
+              <span className={cn("mt-[5px] size-2 shrink-0 rounded-full", theme.dot)} />
+              <div className="min-w-0 flex-1">
+                <p className="flex items-center justify-between gap-2">
+                  <span className="text-[12.5px] font-medium leading-tight text-slate-800 dark:text-slate-100">
+                    {phase.label}
+                  </span>
+                </p>
+                <p className="text-[10.5px] tabular-nums text-slate-500 dark:text-slate-400">
+                  {phase.startLabel} → {phase.endLabel}
+                </p>
+              </div>
+            </li>
+          );
+        })}
+      </ol>
+      {dueDateISO && (
+        <p className="mt-3 border-t border-slate-100 pt-2.5 text-[11px] text-slate-500 dark:border-slate-800/80 dark:text-slate-400">
+          Submit by{" "}
+          <span className="font-semibold text-slate-700 dark:text-slate-200">
+            {format(new Date(dueDateISO), "EEE d MMM")}
+          </span>
+        </p>
+      )}
+    </RailCard>
+  );
+}
+
+/* --------------- Convert panel (sticky in rail) -------------------------- */
+
+function ConvertPanel({
   subjects,
   subjectId,
   setSubjectId,
@@ -1083,45 +2047,41 @@ function ConvertCard({
 }) {
   const noSubjects = subjects.length === 0;
   return (
-    <article className="relative overflow-hidden rounded-3xl border border-violet-200 bg-gradient-to-br from-violet-50/80 via-white to-cyan-50/60 p-5 shadow-[0_1px_2px_rgba(15,23,42,0.05),0_24px_60px_-32px_rgba(139,92,246,0.35)] sm:p-6 dark:border-violet-900/55 dark:from-violet-950/25 dark:via-[#060e1e] dark:to-cyan-950/20 dark:shadow-[0_1px_2px_rgba(2,6,23,0.6),0_32px_72px_-28px_rgba(139,92,246,0.45)]">
-      <header className="flex items-center gap-2">
-        <span className="inline-flex size-9 items-center justify-center rounded-xl bg-gradient-to-br from-violet-500 to-cyan-500 text-white shadow-lg shadow-violet-500/30">
-          <ArrowRight size={16} />
+    <article className="relative overflow-hidden rounded-2xl border border-slate-300/80 bg-white p-5 shadow-md ring-1 ring-violet-100/40 dark:border-slate-700/80 dark:bg-gradient-to-b dark:from-slate-900/80 dark:to-[#0a1020] dark:shadow-[0_1px_0_0_rgba(255,255,255,0.03)] dark:ring-violet-500/10">
+      <span
+        aria-hidden
+        className="absolute inset-x-0 top-0 h-[2px] bg-gradient-to-r from-violet-500/80 via-violet-500 to-violet-500/80 dark:from-violet-400/70 dark:via-violet-400 dark:to-violet-400/70"
+      />
+
+      <div className="flex items-center gap-2.5">
+        <span className="inline-flex size-8 items-center justify-center rounded-lg bg-violet-100 text-violet-700 ring-1 ring-violet-200 dark:bg-violet-500/15 dark:text-violet-200 dark:ring-violet-500/25">
+          <ClipboardList size={14} />
         </span>
-        <div>
-          <p className="text-[10.5px] font-semibold uppercase tracking-[0.16em] text-violet-700 dark:text-violet-300">
-            Turn the plan into real work
+        <div className="min-w-0">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-slate-400">
+            Convert to assignment
           </p>
-          <h3 className="mt-0.5 text-[17px] font-bold tracking-tight text-slate-900 dark:text-white">
-            Convert to a StudySprint assignment
-          </h3>
-          <p className="mt-1 text-[12.5px] text-slate-600 dark:text-slate-300">
-            Review the details, then drop everything into your planner with the subtasks already
-            broken out. You stay in control — nothing is saved until you click convert.
+          <p className="text-[12.5px] font-semibold leading-tight text-slate-900 dark:text-white">
+            Ready to schedule
           </p>
         </div>
-      </header>
+      </div>
 
-      <div className="mt-5 grid gap-4 sm:grid-cols-2">
-        <div>
-          <label className="mb-1 block text-[11.5px] font-semibold uppercase tracking-[0.14em] text-slate-600 dark:text-slate-300">
-            Assignment title
-          </label>
+      <div className="mt-4 space-y-3">
+        <Field label="Title">
           <input
             type="text"
             value={editedTitle}
             onChange={(e) => setEditedTitle(e.target.value)}
-            className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-[13.5px] text-slate-900 outline-none transition-colors focus:border-violet-400 dark:border-slate-700 dark:bg-[#070f1f] dark:text-white dark:focus:border-violet-500"
+            className={fieldInputClass}
           />
-        </div>
-        <div>
-          <label className="mb-1 block text-[11.5px] font-semibold uppercase tracking-[0.14em] text-slate-600 dark:text-slate-300">
-            Subject
-          </label>
+        </Field>
+
+        <Field label="Subject">
           <select
             value={subjectId}
             onChange={(e) => setSubjectId(e.target.value)}
-            className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-[13.5px] text-slate-900 outline-none transition-colors focus:border-violet-400 dark:border-slate-700 dark:bg-[#070f1f] dark:text-white dark:focus:border-violet-500"
+            className={fieldInputClass}
           >
             {noSubjects && <option value="">Add a subject first</option>}
             {subjects.map((s) => (
@@ -1130,133 +2090,132 @@ function ConvertCard({
               </option>
             ))}
           </select>
-        </div>
-        <div>
-          <label className="mb-1 block text-[11.5px] font-semibold uppercase tracking-[0.14em] text-slate-600 dark:text-slate-300">
-            Due date
-          </label>
-          <input
-            type="date"
-            value={editedDueDate}
-            onChange={(e) => setEditedDueDate(e.target.value)}
-            className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-[13.5px] text-slate-900 outline-none transition-colors focus:border-violet-400 dark:border-slate-700 dark:bg-[#070f1f] dark:text-white dark:focus:border-violet-500"
-          />
-        </div>
-        <div>
-          <label className="mb-1 block text-[11.5px] font-semibold uppercase tracking-[0.14em] text-slate-600 dark:text-slate-300">
-            Priority
-          </label>
-          <div className="flex flex-wrap gap-1.5">
-            {PRIORITY_OPTIONS.map((p) => {
-              const active = priority === p;
-              return (
-                <button
-                  key={p}
-                  type="button"
-                  onClick={() => setPriority(p)}
-                  className={cn(
-                    "rounded-full border px-3 py-1 text-[12px] font-semibold transition-colors",
-                    active
-                      ? "border-violet-500 bg-violet-600 text-white shadow-sm"
-                      : "border-slate-200 bg-white text-slate-600 hover:border-violet-300 hover:text-violet-700 dark:border-slate-700 dark:bg-[#070f1f] dark:text-slate-300 dark:hover:border-violet-600 dark:hover:text-violet-200",
-                  )}
-                >
+        </Field>
+
+        <div className="grid grid-cols-2 gap-2">
+          <Field label="Due date">
+            <input
+              type="date"
+              value={editedDueDate}
+              onChange={(e) => setEditedDueDate(e.target.value)}
+              className={fieldInputClass}
+            />
+          </Field>
+          <Field label="Priority">
+            <select
+              value={priority}
+              onChange={(e) => setPriority(e.target.value as Priority)}
+              className={fieldInputClass}
+            >
+              {PRIORITY_OPTIONS.map((p) => (
+                <option key={p} value={p}>
                   {p}
-                </button>
-              );
-            })}
-          </div>
+                </option>
+              ))}
+            </select>
+          </Field>
         </div>
       </div>
 
-      <div className="mt-5 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-violet-200/60 bg-white/70 px-4 py-3 text-[12.5px] text-slate-700 dark:border-violet-800/50 dark:bg-[#050d1b]/70 dark:text-slate-200">
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-          <span>
-            <span className="font-bold text-violet-700 dark:text-violet-300">{includedStages}</span>{" "}
-            of {totalStages} stages · {totalSubtasks} subtasks
+      <div className="mt-4 flex items-center justify-between rounded-lg border border-slate-200/80 bg-slate-50/70 px-3 py-2 text-[11.5px] text-slate-600 dark:border-slate-800 dark:bg-slate-900/40 dark:text-slate-300">
+        <span className="inline-flex items-center gap-1.5">
+          <Layers size={11} className="text-slate-400" />
+          <span className="tabular-nums font-semibold text-slate-900 dark:text-white">
+            {includedStages}
           </span>
-          {noSubjects && (
-            <span className="inline-flex items-center gap-1 text-[11.5px] font-semibold text-amber-700 dark:text-amber-300">
-              <AlertCircle size={11} /> Add a subject first:{" "}
-              <Link to="/subjects" className="underline underline-offset-2">
-                go to subjects
-              </Link>
-            </span>
-          )}
-        </div>
-        <Button
-          variant="primary"
-          onClick={onConvert}
-          disabled={noSubjects}
-          iconLeft={<ArrowUpRight size={14} />}
-          className="bg-gradient-to-br from-violet-600 via-fuchsia-500 to-cyan-500 hover:from-violet-500 hover:via-fuchsia-400 hover:to-cyan-400"
-        >
-          Convert to assignment
-        </Button>
+          <span className="text-slate-500 dark:text-slate-400">/ {totalStages} stages</span>
+        </span>
+        <span className="inline-flex items-center gap-1.5">
+          <ListChecks size={11} className="text-slate-400" />
+          <span className="tabular-nums font-semibold text-slate-900 dark:text-white">
+            {totalSubtasks}
+          </span>
+          <span className="text-slate-500 dark:text-slate-400">subtasks</span>
+        </span>
       </div>
+
+      {noSubjects && (
+        <p className="mt-3 inline-flex items-center gap-1.5 text-[11.5px] text-amber-700 dark:text-amber-300">
+          <AlertCircle size={11} /> Add a subject first —{" "}
+          <Link to="/subjects" className="underline underline-offset-2">
+            go to subjects
+          </Link>
+        </p>
+      )}
+
+      <Button
+        variant="primary"
+        onClick={onConvert}
+        disabled={noSubjects}
+        iconLeft={<ArrowUpRight size={14} />}
+        className="mt-4 w-full bg-violet-600 py-2.5 text-[13.5px] font-semibold shadow-sm shadow-violet-600/20 hover:bg-violet-700 disabled:bg-slate-300 dark:bg-violet-600 dark:shadow-violet-500/20 dark:hover:bg-violet-500 dark:disabled:bg-slate-700 dark:disabled:shadow-none"
+      >
+        Convert to assignment
+      </Button>
     </article>
   );
 }
 
-/* ---------------------------- Ethical safeguard -------------------------- */
+const fieldInputClass =
+  "w-full rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-[12.5px] text-slate-900 outline-none transition-colors focus:border-violet-400 focus:ring-2 focus:ring-violet-200/60 dark:border-slate-700 dark:bg-slate-900 dark:text-white dark:focus:border-violet-500 dark:focus:ring-violet-900/40";
 
-function EthicalNote() {
+function Field({ label, children }: { label: string; children: ReactNode }) {
   return (
-    <div className="rounded-2xl border border-slate-200 bg-slate-50/60 px-4 py-3 text-[12px] leading-relaxed text-slate-600 dark:border-slate-800 dark:bg-slate-900/30 dark:text-slate-300">
-      <p className="flex items-start gap-2">
-        <ShieldCheck size={14} className="mt-0.5 shrink-0 text-emerald-600 dark:text-emerald-300" />
-        <span>
-          <span className="font-semibold text-slate-800 dark:text-white">
-            StudySprint planner assist supports planning and interpretation only.
-          </span>{" "}
-          The thinking, writing, research, and final academic decisions stay with you. Always
-          cross-check against your official brief and rubric, and follow your institution's
-          academic integrity policies.
-        </span>
-      </p>
-    </div>
+    <label className="block">
+      <span className="mb-1 block text-[10.5px] font-semibold uppercase tracking-[0.12em] text-slate-500 dark:text-slate-400">
+        {label}
+      </span>
+      {children}
+    </label>
   );
 }
 
-/* ------------------------------ Intro examples --------------------------- */
+/* ============================================================================
+ * Intro examples (pre-analysis)
+ * ========================================================================== */
 
 function IntroExamples({ onLoadSample }: { onLoadSample: () => void }) {
   const examples = [
     {
       icon: FileText,
-      title: "Pasted a brief?",
-      body: "Hit 'Break down my brief' — you'll get a plan in seconds.",
+      title: "Got a PDF brief?",
+      body: "Upload it above — StudySprint reads it server-side and returns a plan in seconds.",
+      interactive: false,
     },
     {
       icon: Upload,
-      title: "Got a .txt or .md file?",
-      body: "Drop it on the card above or use the upload button.",
+      title: "DOCX or text works too",
+      body: "Drop a .docx or paste the text. Scanned PDFs need a text-copy export from your LMS.",
+      interactive: false,
     },
     {
-      icon: Sparkles,
-      title: "Want a quick demo?",
-      body: "Load the sample SWE group-report brief and see it in action.",
+      icon: Wand2,
+      title: "Try the demo",
+      body: "Load the sample SWE group-report brief and see how the planner interprets it.",
+      interactive: true,
     },
   ];
   return (
     <section className="grid gap-3 sm:grid-cols-3">
-      {examples.map((e, i) => (
+      {examples.map((e) => (
         <button
           key={e.title}
           type="button"
-          onClick={i === 2 ? onLoadSample : undefined}
+          onClick={e.interactive ? onLoadSample : undefined}
           className={cn(
-            "group relative overflow-hidden rounded-2xl border bg-white p-4 text-left shadow-sm transition-all dark:border-slate-800 dark:bg-[#060e1e]/90",
-            i === 2
-              ? "border-violet-200 hover:-translate-y-0.5 hover:border-violet-300 hover:shadow-lg dark:border-violet-900/60"
-              : "border-slate-200/80 cursor-default",
+            "group rounded-xl border border-slate-200 bg-white p-4 text-left shadow-sm transition-colors dark:border-slate-800 dark:bg-[#0a1020]",
+            e.interactive
+              ? "cursor-pointer hover:border-violet-300 hover:bg-violet-50/30 dark:hover:border-violet-800 dark:hover:bg-violet-950/20"
+              : "cursor-default",
           )}
         >
-          <span className="inline-flex size-9 items-center justify-center rounded-xl bg-gradient-to-br from-violet-500/15 to-cyan-500/15 text-violet-600 ring-1 ring-violet-200/60 dark:text-violet-200 dark:ring-violet-800/60">
-            <e.icon size={16} />
+          <span className="inline-flex size-8 items-center justify-center rounded-md border border-slate-200 bg-slate-50 text-slate-600 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300">
+            <e.icon size={14} />
           </span>
-          <p className="mt-3 text-[13.5px] font-bold text-slate-900 dark:text-white">{e.title}</p>
-          <p className="mt-1 text-[12px] leading-relaxed text-slate-600 dark:text-slate-300">
+          <p className="mt-3 text-[13px] font-semibold text-slate-900 dark:text-white">
+            {e.title}
+          </p>
+          <p className="mt-1 text-[11.5px] leading-relaxed text-slate-600 dark:text-slate-400">
             {e.body}
           </p>
         </button>

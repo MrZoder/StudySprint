@@ -12,6 +12,14 @@ dist
 dist-ssr
 *.local
 
+# Netlify CLI local state (cache for `netlify dev` / `netlify deploy`)
+.netlify
+
+# Env files — keep real API keys out of version control.
+.env
+.env.*
+!.env.example
+
 # Local temp scratch
 .commit-msg.tmp
 

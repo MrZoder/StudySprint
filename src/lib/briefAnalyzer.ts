@@ -1,99 +1,47 @@
 /**
- * StudySprint Brief Analyzer
+ * StudySprint Brief Analyzer — heuristic fallback
  * -----------------------------------------------------------------------------
- * A local, heuristic-based analysis engine that turns a raw assignment brief
- * into a structured plan (summary, deliverables, requirements, staged action
- * plan, pacing timeline, and quality-focused guidance).
+ * Deterministic rule-based brief analyser that runs fully in the browser / on
+ * the server without any LLM call. It is used as:
+ *
+ *   1. A zero-config fallback when no LLM API key is configured.
+ *   2. A safety net if the server-side AI call fails or times out.
  *
  * Design intent:
- *   - The planner assist is deliberately rule-based so it runs fully offline,
- *     respects student privacy, and cannot fabricate content.
- *   - It models how a strong student would break down a brief: identify the
- *     artefact being produced, pull out the concrete constraints, then plan
- *     the stages backwards from the due date.
- *   - Output types are designed to plug directly into the Planner context so
- *     stages can be converted into a StudySprint assignment + subtasks.
+ *   - Never fabricate content. If the brief doesn't state a due date or word
+ *     count, the analyser returns `missing` rather than guessing.
+ *   - Mirror how a disciplined student breaks a brief down: identify the
+ *     artefact, pull out constraints, plan the stages backwards from the
+ *     due date.
+ *   - Produce the same `BriefAnalysis` shape the LLM path returns so the UI
+ *     can render either indistinguishably.
  */
 
 import { addDays, differenceInCalendarDays, format } from "date-fns";
 
-/* --------------------------------- Types --------------------------------- */
+import type {
+  BriefAnalysis,
+  Deliverable,
+  DeliverableType,
+  FieldSignals,
+  PlanStage,
+  Requirement,
+  RequirementIcon,
+  RubricSignal,
+  TimelinePhase,
+} from "../types/briefAnalysis";
 
-export type DeliverableType =
-  | "report"
-  | "essay"
-  | "presentation"
-  | "research"
-  | "code"
-  | "analysis"
-  | "reflection"
-  | "quiz"
-  | "group"
-  | "other";
-
-export interface Deliverable {
-  type: DeliverableType;
-  label: string;
-  detail?: string;
-}
-
-export type RequirementIcon =
-  | "wordCount"
-  | "references"
-  | "format"
-  | "group"
-  | "submission"
-  | "rubric"
-  | "topic";
-
-export interface Requirement {
-  icon: RequirementIcon;
-  label: string;
-  detail?: string;
-}
-
-export interface PlanStage {
-  id: string;
-  title: string;
-  description: string;
-  subtasks: string[];
-  phaseId: string;
-}
-
-export interface TimelinePhase {
-  id: string;
-  label: string;
-  description: string;
-  /** 0..1, portion of total window consumed at the end of this phase */
-  endPortion: number;
-}
-
-export interface BriefAnalysis {
-  /** Short, student-friendly title StudySprint thinks this assignment is. */
-  title: string;
-  /** Plain-language 1–3 sentence interpretation of the brief. */
-  summary: string;
-  /** What the student has to produce. */
-  deliverables: Deliverable[];
-  /** Concrete constraints pulled out of the text. */
-  requirements: Requirement[];
-  /** Extracted or guessed due date ISO string, if any. */
-  dueDateISO?: string;
-  /** Human-readable due date phrase detected in the brief. */
-  dueDatePhrase?: string;
-  /** Ordered action plan the student should work through. */
-  stages: PlanStage[];
-  /** Named phases covering the span from today → due date. */
-  timeline: TimelinePhase[];
-  /** Quality-oriented nudges that stronger students tend to follow. */
-  highMarkTips: string[];
-  /** How confident the heuristic is about the overall interpretation. */
-  confidence: "low" | "medium" | "high";
-  /** Rough total working hours the brief implies, if detectable. */
-  estimatedHours?: number;
-  /** Echoed raw brief for reference in the UI. */
-  rawLength: number;
-}
+export type {
+  BriefAnalysis,
+  Deliverable,
+  DeliverableType,
+  FieldSignals,
+  PlanStage,
+  Requirement,
+  RequirementIcon,
+  RubricSignal,
+  TimelinePhase,
+} from "../types/briefAnalysis";
 
 /* ---------------------------- Keyword dictionary -------------------------- */
 
@@ -231,21 +179,15 @@ function parseMonth(name: string): number | null {
   return idx >= 0 ? idx : null;
 }
 
-/**
- * Best-effort due date extractor. Returns the first convincing date it finds.
- * Supports: ISO, "DD Month [YYYY]", "Month DD[, YYYY]", and "in N days/weeks".
- */
 function extractDueDate(text: string, now: Date): { iso?: string; phrase?: string } {
   const windowed = text.replace(/\s+/g, " ").toLowerCase();
 
-  // ISO yyyy-mm-dd
   const iso = windowed.match(/\b(20\d{2})-(\d{2})-(\d{2})\b/);
   if (iso) {
     const d = new Date(`${iso[1]}-${iso[2]}-${iso[3]}`);
     if (!isNaN(+d)) return { iso: d.toISOString(), phrase: iso[0] };
   }
 
-  // dd/mm/yyyy or dd-mm-yyyy (assume day-first for UK/AU audience)
   const dmy = windowed.match(/\b(\d{1,2})[/-](\d{1,2})[/-](20\d{2})\b/);
   if (dmy) {
     const day = Number(dmy[1]);
@@ -255,7 +197,6 @@ function extractDueDate(text: string, now: Date): { iso?: string; phrase?: strin
     if (!isNaN(+d)) return { iso: d.toISOString(), phrase: dmy[0] };
   }
 
-  // "due 15 October [2026]" / "by 3rd November"
   const dayMonth = windowed.match(
     /(?:due|by|submit(?:ted)?(?:\s+on)?|deadline[:\s]*)\s+(?:on\s+)?(\d{1,2})(?:st|nd|rd|th)?\s+(january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)(?:\s+(20\d{2}))?/,
   );
@@ -270,7 +211,6 @@ function extractDueDate(text: string, now: Date): { iso?: string; phrase?: strin
     }
   }
 
-  // "October 15[, 2026]"
   const monthDay = windowed.match(
     /\b(january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\s+(\d{1,2})(?:st|nd|rd|th)?(?:,?\s+(20\d{2}))?/,
   );
@@ -285,7 +225,6 @@ function extractDueDate(text: string, now: Date): { iso?: string; phrase?: strin
     }
   }
 
-  // "in N days/weeks"
   const relative = windowed.match(/\bin\s+(\d{1,2})\s+(day|week)s?\b/);
   if (relative) {
     const n = Number(relative[1]);
@@ -302,7 +241,6 @@ function extractTitle(text: string, deliverables: Deliverable[]): string {
   const trimmed = text.trim();
   if (!trimmed) return "Untitled assignment";
 
-  // Explicit labels
   const labelled = trimmed.match(
     /(?:assignment\s+title|assignment|task\s+title|title|topic)[:\-–]\s*(.{3,100})/i,
   );
@@ -310,14 +248,12 @@ function extractTitle(text: string, deliverables: Deliverable[]): string {
     return truncate(labelled[1].replace(/[\r\n].*$/, "").trim(), 80);
   }
 
-  // First non-empty line, truncated
   const firstLine = trimmed.split(/\r?\n/).find((l) => l.trim().length > 0);
   if (firstLine) {
     const cleaned = firstLine.replace(/[*#>•]+/g, "").trim();
     if (cleaned.length >= 6 && cleaned.length <= 110) return truncate(cleaned, 90);
   }
 
-  // Fallback: deliverable-based
   const primary = deliverables[0];
   return primary ? `${primary.label} assignment` : "Assignment brief";
 }
@@ -379,9 +315,7 @@ interface StageTemplate {
   description: string;
   subtasks: string[];
   phaseId: string;
-  /** Deliverable types that favour including this stage. */
   appliesTo?: DeliverableType[];
-  /** Always include unless `appliesTo` trumps. */
   alwaysInclude?: boolean;
 }
 
@@ -582,7 +516,7 @@ const STAGE_TEMPLATES: StageTemplate[] = [
   },
 ];
 
-const TIMELINE_TEMPLATE: TimelinePhase[] = [
+export const DEFAULT_TIMELINE: TimelinePhase[] = [
   {
     id: "discover",
     label: "Discover & plan",
@@ -621,6 +555,7 @@ const GENERAL_TIPS: string[] = [
   "Read the rubric before you start drafting — write for the rubric, not just the topic.",
   "Draft the hardest section first while your focus is freshest.",
   "Leave at least 24 hours between finishing the draft and final editing.",
+  "Every claim deserves a source or a reason — vague assertions lose marks quickly.",
 ];
 
 const DELIVERABLE_TIPS: Partial<Record<DeliverableType, string[]>> = {
@@ -654,6 +589,115 @@ const DELIVERABLE_TIPS: Partial<Record<DeliverableType, string[]>> = {
   ],
 };
 
+/* ------------------------ Sections & rubric signals ----------------------- */
+
+const SECTION_LIBRARY: Partial<Record<DeliverableType, string[]>> = {
+  report: [
+    "Title page",
+    "Executive summary",
+    "Introduction",
+    "Background / context",
+    "Methodology",
+    "Findings / analysis",
+    "Recommendations",
+    "Conclusion",
+    "References",
+  ],
+  essay: [
+    "Introduction with thesis",
+    "Body paragraphs (one claim each)",
+    "Counter-argument",
+    "Conclusion",
+    "References",
+  ],
+  research: [
+    "Research question",
+    "Literature review",
+    "Methodology",
+    "Findings",
+    "Discussion",
+    "References",
+  ],
+  presentation: [
+    "Title slide",
+    "Problem / context",
+    "Proposed solution",
+    "Evidence / data",
+    "Conclusion & Q&A",
+  ],
+  code: [
+    "Problem statement",
+    "Project structure",
+    "Core implementation",
+    "Tests",
+    "README / documentation",
+  ],
+  analysis: [
+    "Introduction",
+    "Framework / lens",
+    "Analysis of evidence",
+    "Discussion",
+    "Conclusion",
+    "References",
+  ],
+  reflection: [
+    "Context",
+    "Event / experience",
+    "Reflection",
+    "Learning outcomes",
+    "Forward plan",
+  ],
+};
+
+function deriveRubricSignals(text: string): RubricSignal[] {
+  const signals: RubricSignal[] = [];
+  // Pattern: "criterion 25%" / "analysis 35%"
+  const weightRe = /\b([a-z][a-z\s/&-]{2,30}?)\s*[(\-–:]?\s*(\d{1,2}\s*%|\d{1,2}\s*percent)/gi;
+  const seen = new Set<string>();
+  let match: RegExpExecArray | null;
+  while ((match = weightRe.exec(text)) !== null) {
+    const rawName = match[1].trim().replace(/[,;:]$/g, "");
+    const weight = match[2].replace(/\s*percent/i, "%").trim();
+    const name = titleCase(rawName);
+    if (name.length < 3 || name.length > 40) continue;
+    if (/^(the|this|that|one|two|three|four|five|six|seven|eight|nine|ten|up to|only|at least|just|full|total|over|above|below)$/i.test(rawName)) continue;
+    const key = name.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    signals.push({ criterion: name, weight });
+  }
+
+  // Common rubric words that usually appear without weights
+  const knownCriteria: Array<[RegExp, string, string]> = [
+    [/\bclarity\b/i, "Clarity", "Write cleanly and structure ideas logically."],
+    [/\banalys(?:is|e)\b/i, "Analysis", "Go beyond description — explain why the evidence matters."],
+    [/\bargument\b/i, "Argument", "Make a clear claim and sustain it throughout."],
+    [/\bpresentation\b/i, "Presentation", "Polish formatting, layout and references."],
+    [/\bcritical\s+thinking\b/i, "Critical thinking", "Consider alternative interpretations explicitly."],
+    [/\bevidence\b/i, "Use of evidence", "Back every claim with a credible source or data."],
+    [/\bstructure\b/i, "Structure", "Signpost sections and keep transitions smooth."],
+    [/\boriginality\b/i, "Originality", "Bring a fresh angle, not just a summary."],
+  ];
+  for (const [re, name, guidance] of knownCriteria) {
+    if (!re.test(text)) continue;
+    const key = name.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    signals.push({ criterion: name, guidance });
+  }
+
+  return signals.slice(0, 8);
+}
+
+function titleCase(s: string): string {
+  return s
+    .toLowerCase()
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(" ");
+}
+
 /* --------------------------------- Core ----------------------------------- */
 
 function detectDeliverables(text: string): Deliverable[] {
@@ -681,7 +725,6 @@ function detectRequirements(text: string, wordCount?: number): Requirement[] {
       found.push({ icon: entry.icon, label: entry.label });
     }
   }
-  // De-duplicate by label
   const seen = new Set<string>();
   return found.filter((r) => {
     if (seen.has(r.label)) return false;
@@ -720,7 +763,6 @@ function buildTips(deliverables: Deliverable[]): string[] {
     const extra = DELIVERABLE_TIPS[d.type];
     if (extra) tips.push(...extra);
   }
-  // Cap for readability
   return Array.from(new Set(tips)).slice(0, 6);
 }
 
@@ -743,32 +785,62 @@ function gradeConfidence(
 
 function estimateHours(deliverables: Deliverable[], wordCount?: number): number | undefined {
   let hours = 0;
-  if (wordCount) {
-    // ~250 quality words/hour for student academic writing
-    hours += Math.round(wordCount / 250);
-  }
+  if (wordCount) hours += Math.round(wordCount / 250);
   for (const d of deliverables) {
     switch (d.type) {
-      case "research":
-        hours += 6;
-        break;
-      case "presentation":
-        hours += 5;
-        break;
-      case "code":
-        hours += 10;
-        break;
-      case "analysis":
-        hours += 4;
-        break;
-      case "reflection":
-        hours += 2;
-        break;
-      default:
-        break;
+      case "research": hours += 6; break;
+      case "presentation": hours += 5; break;
+      case "code": hours += 10; break;
+      case "analysis": hours += 4; break;
+      case "reflection": hours += 2; break;
+      default: break;
     }
   }
   return hours > 0 ? hours : undefined;
+}
+
+function buildRequiredSections(deliverables: Deliverable[]): string[] {
+  const sections = new Set<string>();
+  for (const d of deliverables) {
+    const list = SECTION_LIBRARY[d.type];
+    if (list) list.forEach((s) => sections.add(s));
+  }
+  return Array.from(sections).slice(0, 10);
+}
+
+function buildMissingDetails(
+  text: string,
+  wordCount: number | undefined,
+  dueDateISO: string | undefined,
+  rubric: RubricSignal[],
+  hasReferences: boolean,
+): string[] {
+  const missing: string[] = [];
+  if (!dueDateISO) missing.push("No clear due date detected — confirm the submission deadline before planning.");
+  if (!wordCount) missing.push("No word count detected — check the brief or course page for a target length.");
+  if (rubric.length === 0) missing.push("No rubric signals detected — find the marking criteria before drafting.");
+  if (!hasReferences && /\b(essay|report|research|analysis)\b/i.test(text)) {
+    missing.push("Citation style not stated — confirm whether APA, Harvard, IEEE or MLA is required.");
+  }
+  if (!/\bsubmit|submission|turnitin|upload|portal|lms\b/i.test(text)) {
+    missing.push("Submission method not stated — check where and in what format to submit.");
+  }
+  return missing;
+}
+
+function buildSignals(
+  wordCount: number | undefined,
+  dueDateISO: string | undefined,
+  rubric: RubricSignal[],
+  requirements: Requirement[],
+): FieldSignals {
+  return {
+    dueDate: dueDateISO ? "confirmed" : "missing",
+    wordCount: wordCount ? "confirmed" : "missing",
+    rubric: rubric.length > 0 ? "confirmed" : "missing",
+    references: requirements.some((r) => r.icon === "references") ? "confirmed" : "missing",
+    submission: requirements.some((r) => r.icon === "submission") ? "confirmed" : "missing",
+  };
 }
 
 /* ---------------------------------- API ---------------------------------- */
@@ -790,19 +862,35 @@ export function analyzeBrief(
   const highMarkTips = buildTips(deliverables);
   const confidence = gradeConfidence(deliverables, requirements, dueDateISO, text.length);
   const estimatedHours = estimateHours(deliverables, wordCount);
+  const rubricSignals = deriveRubricSignals(text);
+  const requiredSections = buildRequiredSections(deliverables);
+  const missingDetails = buildMissingDetails(
+    text,
+    wordCount,
+    dueDateISO,
+    rubricSignals,
+    requirements.some((r) => r.icon === "references"),
+  );
+  const signals = buildSignals(wordCount, dueDateISO, rubricSignals, requirements);
 
   return {
     title,
     summary,
     deliverables,
     requirements,
+    requiredSections,
+    rubricSignals,
+    missingDetails,
     dueDateISO,
     dueDatePhrase,
+    wordCount,
     stages,
-    timeline: TIMELINE_TEMPLATE.map((t) => ({ ...t })),
+    timeline: DEFAULT_TIMELINE.map((t) => ({ ...t })),
     highMarkTips,
     confidence,
+    signals,
     estimatedHours,
+    source: "heuristic",
     rawLength: text.length,
   };
 }
@@ -819,10 +907,6 @@ export interface PhaseDateRange {
   endLabel: string;
 }
 
-/**
- * Project the template phases onto a real calendar window from `from` → `to`.
- * Requires a due date to be meaningful; returns null when there isn't one.
- */
 export function projectTimeline(
   timeline: TimelinePhase[],
   to?: string,

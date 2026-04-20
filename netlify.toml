@@ -1,0 +1,47 @@
+# -----------------------------------------------------------------------------
+# StudySprint — Netlify deployment configuration
+# -----------------------------------------------------------------------------
+# This file turns the repo into a Netlify-deployable project with a working
+# server-side AI Planner endpoint:
+#
+#   - `npm run build` produces the static SPA in `dist/`, which Netlify hosts.
+#   - The Netlify Function in `netlify/functions/ai-planner-analyze.mts`
+#     wraps the same `handleAnalyze` used by the Vite dev middleware, so the
+#     /api/ai-planner/analyze route works identically in dev and in production.
+#
+# Environment variables you must set in the Netlify dashboard
+# (Site settings → Environment variables) — NEVER commit real keys:
+#
+#   OPENAI_API_KEY          Your provider key (OpenAI, Gemini via OpenAI-compat, …)
+#   OPENAI_BASE_URL         Optional, e.g. Gemini:
+#                           https://generativelanguage.googleapis.com/v1beta/openai/
+#   OPENAI_PLANNER_MODEL    Optional, e.g. gemini-2.5-flash-lite or gpt-4o-mini
+#   AI_PLANNER_PROVIDER     Optional: auto | openai | heuristic (default: auto)
+
+[build]
+  command = "npm run build"
+  publish = "dist"
+  functions = "netlify/functions"
+
+[build.environment]
+  # Pin the Node version so local, CI, and Netlify all match. 20 LTS is the
+  # current Netlify default and what Vite 7 is tested against.
+  NODE_VERSION = "20"
+
+# ---------- API routing --------------------------------------------------
+# Rewrite (status 200) so the browser still sees /api/ai-planner/analyze;
+# the function runs behind that URL. `force = true` ensures the rule
+# beats the SPA fallback below.
+[[redirects]]
+  from = "/api/ai-planner/analyze"
+  to = "/.netlify/functions/ai-planner-analyze"
+  status = 200
+  force = true
+
+# ---------- SPA fallback -------------------------------------------------
+# Every non-asset, non-API path goes to index.html so React Router can
+# handle deep links (/assignments/abc, /ai-planner, …).
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200

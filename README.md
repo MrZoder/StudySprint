@@ -48,16 +48,21 @@ The product is scoped as a realistic MVP — small enough to be maintained by a 
 
 ## Features
 
-### AI Brief Breakdown — the planning assistant
-- A dedicated "brief-to-plan" workspace at `/ai-planner`.
-- Paste or drop in an assignment brief and StudySprint returns:
+### AI Planner — academic planning studio
+- A dedicated "brief-to-plan" studio at `/ai-planner`.
+- **PDF-first upload** (DOCX and pasted text also supported) with drag-and-drop, file previews, page counts, and friendly error handling for scanned PDFs.
+- A **server-side AI service** processes the brief and returns a structured plan. The request layer is provider-agnostic (OpenAI wired in by default via `OPENAI_API_KEY`; drop-in support for any OpenAI-compatible endpoint) with a deterministic **on-device heuristic fallback** when no key is configured or the AI service is unreachable.
+- Structured output includes:
   - a plain-language **summary** of what the task is really asking,
-  - a **requirements checklist** (deliverables, word counts, references, rubric, submission format),
-  - a **staged action plan** (understand the brief → map the rubric → research → draft → refine → rubric self-check → submit),
-  - a **suggested timeline** across Discover → Research → Draft → Refine → Polish phases between now and the due date,
+  - **deliverables, constraints, and required sections**,
+  - **rubric signals** with detected weights and guidance,
+  - a **missing / unclear** panel that surfaces what the brief doesn't state (no fabricated dates or word counts),
+  - a **staged action plan** (understand → map rubric → research → outline → draft → refine → rubric self-check → submit),
+  - a **pacing timeline** across Discover → Research → Draft → Refine → Polish phases between now and the due date,
   - **high-mark focus tips** tailored to the deliverable type.
-- The generated plan is fully editable — stages can be toggled, subtasks tweaked — and can be **converted into a real StudySprint assignment with subtasks** in one click.
-- The assist runs fully on-device (no network calls, no data leaves the browser) and is scoped as a *planning* aid only — an explicit ethical safeguard clarifies that thinking, writing, and academic decisions stay with the student.
+- Every field is **editable and reviewable** before anything is saved. Stages toggle in and out of the plan, subtasks are editable inline, and the whole plan **converts into a real StudySprint assignment with seeded subtasks** in one click.
+- A **validation layer** runs against every response (due date, word count, rubric presence, plan-deliverable alignment) and surfaces warnings in the UI so the feature never pretends to be 100% accurate.
+- **Privacy & ethics**: briefs are processed securely server-side for AI-assisted planning only — not stored, not used for training. An explicit safeguard note reminds students that research, writing, argument, and final submission quality remain their responsibility.
 
 ### Dashboard
 - Hero summary with live counts of due-soon, overdue, and completed work.
@@ -145,7 +150,9 @@ The product is scoped as a realistic MVP — small enough to be maintained by a 
 | Dates | **date-fns** |
 | State | React Context (`PlannerContext`, `ThemeContext`, `ToastContext`) |
 | Persistence | `localStorage` (Supabase-ready architecture) |
-| AI Planner | Local heuristic engine (`src/lib/briefAnalyzer.ts`) — runs fully on-device |
+| AI Planner (server) | Vite dev middleware → provider-agnostic AI service (`server/aiPlanner/`). OpenAI-ready via `OPENAI_API_KEY`. |
+| AI Planner (client) | PDF (`pdfjs-dist`) + DOCX (`mammoth`) extraction, structured-output renderer (`src/pages/AIPlanner.tsx`) |
+| Fallback engine | Deterministic on-device heuristic planner (`src/lib/briefAnalyzer.ts`) — used when no API key or the AI call fails |
 | Lint / Format | ESLint 9 + typescript-eslint |
 
 The codebase is intentionally lean: no Redux, no server framework, no premature abstraction — just a clean component-based architecture a small team can maintain.
@@ -164,8 +171,17 @@ src/
 │                        # AssignmentDetail, Calendar, Settings, AIPlanner
 ├── components/          # Reusable UI (cards, badges, modals, forms…)
 ├── context/             # PlannerContext, ThemeContext, ToastContext
-├── lib/                 # Date / progress / priority helpers + briefAnalyzer
-└── types/               # Shared TypeScript types
+├── lib/                 # Helpers: date/progress/priority, briefAnalyzer
+│                        # briefExtract (PDF/DOCX), aiPlannerClient
+└── types/               # Shared TypeScript types (inc. briefAnalysis)
+
+server/                  # Dev-time AI Planner service (Vite plugin)
+├── vitePlugin.ts        # Wires /api/ai-planner/analyze into the dev server
+└── aiPlanner/
+    ├── handler.ts       # Framework-agnostic POST handler
+    ├── provider.ts      # AI provider abstraction (OpenAI + heuristic)
+    ├── prompt.ts        # System prompt + JSON schema for structured output
+    └── validate.ts      # Post-response validation layer (warnings)
 ```
 
 ---
@@ -185,6 +201,65 @@ npm run dev
 ```
 
 Then open [http://localhost:5173](http://localhost:5173).
+
+### AI Planner configuration (optional)
+
+The AI Planner works out of the box using the on-device heuristic engine. To enable the LLM-powered server-side planner, copy the `.env.example` file to `.env.local` and fill in your key:
+
+```bash
+cp .env.example .env.local
+# then edit .env.local
+OPENAI_API_KEY=sk-...
+OPENAI_PLANNER_MODEL=gpt-4o-mini   # optional, default shown
+AI_PLANNER_PROVIDER=auto            # auto | openai | heuristic
+```
+
+With a key set, the Vite dev server exposes `POST /api/ai-planner/analyze`, which parses the brief, calls OpenAI with structured outputs, and returns a validated `BriefAnalysis` payload the UI renders. Without a key, the same endpoint transparently falls back to the deterministic heuristic engine — the UI works identically either way. No secrets are bundled into the client.
+
+Any OpenAI-compatible endpoint works — e.g. to use **Google Gemini via its OpenAI-compatibility shim**:
+
+```bash
+OPENAI_API_KEY=AIza...
+OPENAI_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai/
+OPENAI_PLANNER_MODEL=gemini-2.5-flash-lite
+AI_PLANNER_PROVIDER=openai
+```
+
+---
+
+## Deploying to Netlify (AI features included)
+
+The built SPA is a static bundle, but the AI Planner needs a server to hold your API key securely. This repo ships with a ready-to-go **Netlify Function** so the whole thing — static UI + `/api/ai-planner/analyze` endpoint — deploys from a single `git push`.
+
+**What's in the box**
+- `netlify.toml` — tells Netlify to run `npm run build`, publish `dist/`, mount functions from `netlify/functions/`, and rewrite `/api/ai-planner/analyze` to the function.
+- `netlify/functions/ai-planner-analyze.mts` — a thin Fetch-style wrapper around the same `handleAnalyze` used by the Vite dev middleware, so local dev and production behave identically.
+
+**One-time setup**
+
+1. **Connect the repo** to Netlify (`Add new site → Import an existing project` → pick this repo). Netlify auto-detects the build settings from `netlify.toml`.
+2. **Add environment variables** in *Site settings → Environment variables*. These are server-only and never reach the client bundle:
+
+| Variable | Required | Example |
+| --- | --- | --- |
+| `OPENAI_API_KEY` | yes (for LLM path) | `sk-...` or Gemini `AIza...` |
+| `OPENAI_BASE_URL` | optional | `https://generativelanguage.googleapis.com/v1beta/openai/` |
+| `OPENAI_PLANNER_MODEL` | optional | `gpt-4o-mini` or `gemini-2.5-flash-lite` |
+| `AI_PLANNER_PROVIDER` | optional | `auto` (default), `openai`, or `heuristic` |
+
+3. **Trigger a deploy** (Netlify builds automatically on push). The first build also provisions the Lambda for the function.
+
+**Verifying it works**
+- Open the deployed site and run an analysis. The header on the result page should read `Model: gpt-4o-mini` (or whichever model you set), not `On-device planner`.
+- In Netlify's *Functions* tab, `ai-planner-analyze` should show invocations each time you analyse a brief.
+- If you see "Using on-device fallback" in the UI, check the function logs — usually either the env var is missing or the upstream provider returned a non-2xx (e.g. Gemini free-tier quota exhaustion).
+
+**A note on the shared key**
+
+The configuration above uses one key for every visitor — fine for a demo or portfolio. If the app goes wider, be aware:
+- Every analysis counts against *your* provider quota and billing.
+- There is currently no rate-limit on the function — a scripted abuser could burn through your budget.
+- If you need to productionise, add per-IP throttling inside the function, or switch to a "bring your own key" pattern where users paste their own key into Settings (kept in `localStorage`, sent with each request).
 
 ### Available Scripts
 
