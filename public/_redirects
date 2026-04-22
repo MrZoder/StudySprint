@@ -1,1 +1,6 @@
-/* /index.html 200
+# AI Planner API → Netlify Function (must be before the SPA fallback).
+# The trailing 200! forces the rewrite even if a matching static file exists.
+/api/ai-planner/analyze  /.netlify/functions/ai-planner-analyze  200!
+
+# SPA fallback for React Router deep links.
+/*  /index.html  200
