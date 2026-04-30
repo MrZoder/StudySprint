@@ -1,3 +1,16 @@
+/**
+ * Sidebar — desktop primary navigation.
+ * -----------------------------------------------------------------------------
+ * Renders three sections:
+ *   1. Brand + sprint badge at the top.
+ *   2. Two grouped nav lists (Plan / Library) using NavLink so the active
+ *      route gets highlighted automatically.
+ *   3. Quick stats footer ("Due soon" count + "Open subjects" count).
+ *
+ * The mobile overlay version is the same component — DashboardLayout just
+ * wraps it in a translatable container that slides in from the left. The
+ * `onClose` prop is wired up there for the mobile dismiss button.
+ */
 import { Link, NavLink, useLocation } from 'react-router-dom';
 import {
   LayoutDashboard,

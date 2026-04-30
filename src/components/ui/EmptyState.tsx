@@ -1,3 +1,8 @@
+/**
+ * EmptyState — minimal "nothing to show" placeholder.
+ * Dashed-border card with optional icon. Used inside lists/tables where the
+ * surrounding chrome already provides framing, so this stays deliberately quiet.
+ */
 import type { ReactNode } from "react";
 import { cn } from "../../lib/utils";
 

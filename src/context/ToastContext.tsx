@@ -1,8 +1,25 @@
+/**
+ * ToastProvider — global notification surface.
+ * -----------------------------------------------------------------------------
+ * Lightweight queue with auto-dismiss timers, optional one-shot actions
+ * (e.g. "Undo"), and four semantic tones. The container is portaled into the
+ * provider's own subtree at `position: fixed` near the bottom-right, with a
+ * z-index that sits above the notifications popover so warnings about a
+ * destructive action are never hidden.
+ *
+ * Usage:
+ *   const { showToast } = useToast();
+ *   showToast({ message: "Saved.", tone: "success" });
+ */
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { X } from "lucide-react";
 import { cn } from "../lib/utils";
 import { ToastContext, type ToastItem, type ToastTone } from "./toastStoreContext";
 
+/**
+ * One row of Tailwind classes per tone. Light + dark mode tuned together so
+ * the toast carries a clear semantic meaning at a glance without shouting.
+ */
 const toneStyles: Record<ToastTone, string> = {
   success:
     "border-emerald-200/90 bg-white text-emerald-900 shadow-md dark:border-emerald-900/60 dark:bg-gray-900 dark:text-emerald-200",
@@ -62,6 +79,8 @@ function ToastBar({
 
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<ToastItem[]>([]);
+  // Tracks pending auto-dismiss timeouts so we can clear them on manual
+  // dismiss / unmount and avoid leaking timers.
   const timersRef = useRef<Map<string, number>>(new Map());
 
   const dismissToast = useCallback((id: string) => {
@@ -73,6 +92,9 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     setToasts((prev) => prev.filter((item) => item.id !== id));
   }, []);
 
+  // Push a new toast onto the queue and schedule its auto-dismiss. Callers
+  // can override the default duration (4.2 s) for stickier confirmations like
+  // "Assignment deleted — Undo" which gives ~8 s of grace.
   const showToast = useCallback(
     (input: {
       message: string;
@@ -97,6 +119,8 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     [dismissToast],
   );
 
+  // On unmount, flush any timers we still own. Captured to a local at effect
+  // setup time so the cleanup closure doesn't read a possibly-stale ref.
   useEffect(() => {
     const timerMap = timersRef.current;
     return () => {

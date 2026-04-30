@@ -1,3 +1,9 @@
+/**
+ * CaptureCallout — numbered annotation badges used only in screenshot mode.
+ * Driven by `ANNOTATION_CAPTURE_MODE` from lib/annotationCapture; renders
+ * nothing in normal app use. Lets us drop the same numbered overlays you'd
+ * see in marketing screenshots without forking components.
+ */
 import { cn } from '../lib/utils';
 import { ANNOTATION_CAPTURE_MODE } from '../lib/annotationCapture';
 

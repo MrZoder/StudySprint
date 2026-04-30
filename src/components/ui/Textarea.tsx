@@ -1,3 +1,4 @@
+/** Textarea — multi-line counterpart to Input. Same error/theming model. */
 import { forwardRef, type TextareaHTMLAttributes } from "react";
 import { cn } from "../../lib/utils";
 

@@ -1,3 +1,11 @@
+/**
+ * GlobalTopbarSearch — keyboard-first search for the topbar.
+ * -----------------------------------------------------------------------------
+ * Searches both assignments (by title + subject name/code) and subjects
+ * (by name + code) and renders grouped results in a popover. Up/Down to
+ * navigate, Enter to open, Esc to close. Caps each group at MAX_* so the
+ * panel never grows past a sensible size.
+ */
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { format } from "date-fns";

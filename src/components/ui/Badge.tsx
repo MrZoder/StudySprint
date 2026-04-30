@@ -1,3 +1,8 @@
+/**
+ * Badge — neutral pill primitive.
+ * Just the shape and base typography; callers pass colour utilities via
+ * `className`. Intentionally unstyled by tone so each surface picks its own.
+ */
 import type { ReactNode } from "react";
 import { cn } from "../../lib/utils";
 

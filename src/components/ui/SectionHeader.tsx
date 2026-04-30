@@ -1,3 +1,8 @@
+/**
+ * SectionHeader — large page-level header with optional description + actions.
+ * Responsive: stacks vertically on narrow screens, splits left/right on sm+.
+ * Used at the top of Subjects, Settings, etc. for consistent typography.
+ */
 import type { ReactNode } from "react";
 
 interface SectionHeaderProps {

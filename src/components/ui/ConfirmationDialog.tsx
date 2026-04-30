@@ -1,3 +1,9 @@
+/**
+ * ConfirmationDialog — destructive-action confirmer.
+ * Thin wrapper over Modal that enforces a consistent layout for "are you
+ * sure" prompts (delete subject, clear data, etc.). Defaults to the filled
+ * red button variant since most uses are irreversible.
+ */
 import Button from "./Button";
 import Modal from "./Modal";
 

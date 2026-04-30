@@ -1,3 +1,4 @@
+/** Hook for reading current theme + toggling it. Must be used inside ThemeProvider. */
 import { useContext } from "react";
 import { ThemeContext } from "./themeStoreContext";
 

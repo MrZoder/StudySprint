@@ -1,11 +1,26 @@
+/**
+ * Subject visual themes.
+ * -----------------------------------------------------------------------------
+ * Maps a Subject onto a coordinated set of Tailwind classes for each surface
+ * it appears on (calendar tiles, sidebar dots, badges). The seeded subjects
+ * (CS301 / CS201 / CS305 / ENG202) get curated palettes by code so they
+ * always look identical across the app; user-defined subjects fall back to a
+ * fuzzy match against `subject.color` so they still pick up a sensible
+ * palette without needing to be in the lookup table.
+ */
 import type { Subject } from "../types";
 
+/** Three correlated class strings — same hue applied at three intensities. */
 type SubjectTheme = {
+  /** Tiny coloured dot used in lists and the sidebar. */
   dot: string;
+  /** Pill / badge styling for subject pills. */
   badge: string;
+  /** Calendar event tile styling. */
   calendar: string;
 };
 
+/** Hand-tuned palette per seeded subject code so they stay on-brand. */
 const SUBJECT_THEME_BY_CODE: Record<string, SubjectTheme> = {
   CS301: {
     dot: "bg-blue-500",
@@ -37,6 +52,13 @@ const DEFAULT_THEME: SubjectTheme = {
   calendar: "bg-blue-50 border-blue-200 text-blue-700 dark:bg-blue-950/40 dark:border-blue-900 dark:text-blue-300",
 };
 
+/**
+ * Resolve a subject to its theme. Lookup priority:
+ *   1. Exact match on `subject.code` (covers seeded subjects).
+ *   2. Fuzzy match on `subject.color` (Tailwind utility) so user-created
+ *      subjects with a "bg-amber-500" colour still get the amber palette.
+ *   3. Falls back to the blue default if nothing matches.
+ */
 export function getSubjectTheme(subject?: Subject): SubjectTheme {
   if (!subject) return DEFAULT_THEME;
   const fromCode = SUBJECT_THEME_BY_CODE[subject.code.toUpperCase()];

@@ -1,3 +1,17 @@
+/**
+ * Dashboard — landing surface for the authenticated app (/dashboard).
+ * -----------------------------------------------------------------------------
+ * Optimised for "what should I do next" rather than data exploration. The
+ * student should be able to glance at this for 5 seconds and know whether to
+ * panic, plan, or relax. Layout, top to bottom:
+ *
+ *   1. ReminderPanel  — adaptive headline + workload chips + primary actions.
+ *   2. KPI grid       — overdue / due-soon / completed / streak StatCards.
+ *   3. Week strip     — horizontally scrollable list of upcoming deadlines.
+ *   4. Subject focus  — active assignment count per subject.
+ *
+ * All numbers come from the same `assignments` list — no separate fetches.
+ */
 import { useMemo } from 'react';
 import {
   AlertCircle,

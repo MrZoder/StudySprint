@@ -1,3 +1,15 @@
+/**
+ * Landing — public marketing page mounted at "/".
+ * -----------------------------------------------------------------------------
+ * Single, self-contained page that introduces StudySprint to first-time
+ * visitors. Stitches together hero, feature highlights, AI planner spotlight,
+ * dashboard preview, mobile mockup, and footer sections — each section's
+ * styling stays local to keep the marketing visuals isolated from the app
+ * design system.
+ *
+ * Heavy on Tailwind, light on logic. The only dynamic bit is a "scroll to
+ * section" effect when the user clicks an in-page anchor.
+ */
 import { useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import {

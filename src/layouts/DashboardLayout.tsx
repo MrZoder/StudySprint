@@ -1,13 +1,33 @@
-import { useState } from 'react';
+/**
+ * DashboardLayout — chrome that wraps every authenticated page.
+ * -----------------------------------------------------------------------------
+ * Provides:
+ *   - Persistent sidebar (desktop) + slide-in drawer (mobile)
+ *   - Topbar with breadcrumb, global search, theme toggle, notifications,
+ *     and a profile cluster
+ *   - Bottom mobile nav for the most-trafficked routes
+ *   - The scroll container for whichever child route is rendering
+ *
+ * Notifications popover note: it is portaled to <body> by the popover itself,
+ * so we measure the bell's bounding rect on open + on resize/scroll and pass
+ * those coordinates in. Outside-click logic checks both the bell and the
+ * popover's own ref to decide what counts as "outside".
+ */
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Outlet, useLocation, Link } from 'react-router-dom';
 import Sidebar from '../components/Sidebar';
 import { Bell, Menu, Moon, Sun, Plus, Home, ChevronRight } from 'lucide-react';
+import { differenceInCalendarDays } from 'date-fns';
 import { cn } from '../lib/utils';
 import { useTheme } from '../context/useTheme';
 import MobileNav from '../components/MobileNav';
 import GlobalTopbarSearch from '../components/GlobalTopbarSearch';
+import NotificationsPopover, {
+  type NotificationsAnchorRect,
+} from '../components/NotificationsPopover';
 import { usePlanner } from '../context/usePlanner';
 
+/** Display title shown in the breadcrumb for each top-level route prefix. */
 const routeTitleMap: Record<string, string> = {
   '/dashboard': 'Dashboard',
   '/assignments': 'Assignments',
@@ -19,12 +39,85 @@ const routeTitleMap: Record<string, string> = {
 
 export default function DashboardLayout() {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
+  const [notificationsAnchor, setNotificationsAnchor] =
+    useState<NotificationsAnchorRect | null>(null);
   const { theme, toggleTheme } = useTheme();
   const { pathname } = useLocation();
-  const { assignments } = usePlanner();
+  const { assignments, subjects } = usePlanner();
+  const bellButtonRef = useRef<HTMLButtonElement>(null);
+  const popoverRef = useRef<HTMLDivElement>(null);
 
-  const overdueCount = assignments.filter((a) => a.status === 'Overdue').length;
-  const hasNotifications = overdueCount > 0;
+  // Measure the bell so the portaled popover knows where to anchor itself.
+  // We re-measure on every open and any time the window resizes or scrolls
+  // (e.g. user scrolls the page while it's open) so the popover keeps its
+  // position glued to the bell.
+  const updateAnchor = useCallback(() => {
+    if (!bellButtonRef.current) return;
+    const rect = bellButtonRef.current.getBoundingClientRect();
+    setNotificationsAnchor({
+      top: rect.top,
+      bottom: rect.bottom,
+      left: rect.left,
+      right: rect.right,
+    });
+  }, []);
+
+  // Count anything that needs attention: overdue work + anything due in the
+  // next 7 days that isn't already complete. Source of truth for both the
+  // bell badge and the popover's "x items need attention" copy.
+  const notificationCount = useMemo(() => {
+    const now = new Date();
+    return assignments.reduce((acc, a) => {
+      if (a.status === 'Completed') return acc;
+      const due = new Date(a.dueDate);
+      if (Number.isNaN(due.getTime())) return acc;
+      const days = differenceInCalendarDays(due, now);
+      if (a.status === 'Overdue' || days < 0 || days <= 7) return acc + 1;
+      return acc;
+    }, 0);
+  }, [assignments]);
+  const hasNotifications = notificationCount > 0;
+
+  // Close the popover on outside click and Escape. Because the popover is
+  // portaled to <body>, we have to check both the bell button and the popover
+  // itself to decide what counts as "outside".
+  useEffect(() => {
+    if (!isNotificationsOpen) return;
+    function handleClickOutside(event: MouseEvent) {
+      const target = event.target as Node;
+      if (bellButtonRef.current?.contains(target)) return;
+      if (popoverRef.current?.contains(target)) return;
+      setIsNotificationsOpen(false);
+    }
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape') setIsNotificationsOpen(false);
+    }
+    document.addEventListener('mousedown', handleClickOutside);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [isNotificationsOpen]);
+
+  // Keep the popover glued to the bell while it's open, even if the user
+  // resizes the window or scrolls anywhere on the page.
+  useEffect(() => {
+    if (!isNotificationsOpen) return;
+    updateAnchor();
+    const handler = () => updateAnchor();
+    window.addEventListener('resize', handler);
+    window.addEventListener('scroll', handler, true);
+    return () => {
+      window.removeEventListener('resize', handler);
+      window.removeEventListener('scroll', handler, true);
+    };
+  }, [isNotificationsOpen, updateAnchor]);
+
+  useEffect(() => {
+    setIsNotificationsOpen(false);
+  }, [pathname]);
 
   const pageTitle = Object.entries(routeTitleMap).find(([key]) => pathname.startsWith(key))?.[1] ?? 'StudySprint';
 
@@ -100,18 +193,42 @@ export default function DashboardLayout() {
               {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
             </button>
             <button
+              ref={bellButtonRef}
               type="button"
-              className="relative flex size-10 items-center justify-center rounded-full text-slate-500 transition-colors hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-900/85"
-              aria-label="Notifications"
+              onClick={() => {
+                if (!isNotificationsOpen) updateAnchor();
+                setIsNotificationsOpen((open) => !open);
+              }}
+              className={cn(
+                'relative flex size-10 items-center justify-center rounded-full transition-colors',
+                'text-slate-500 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-900/85',
+                isNotificationsOpen &&
+                  'bg-slate-100 text-slate-800 dark:bg-slate-900/85 dark:text-white',
+              )}
+              aria-label={
+                hasNotifications
+                  ? `Notifications, ${notificationCount} need${notificationCount === 1 ? 's' : ''} attention`
+                  : 'Notifications'
+              }
+              aria-haspopup="dialog"
+              aria-expanded={isNotificationsOpen}
             >
               <Bell size={18} />
               {hasNotifications && (
-                <span className="absolute right-2.5 top-2.5 flex size-2">
-                  <span className="absolute inline-flex size-2 animate-ping rounded-full bg-rose-400 opacity-70" />
-                  <span className="relative inline-flex size-2 rounded-full border border-white bg-rose-500 dark:border-[#020617]" />
+                <span className="absolute -right-0.5 -top-0.5 flex min-w-[1.125rem] items-center justify-center rounded-full bg-rose-500 px-1 text-[10px] font-bold leading-[1.125rem] text-white shadow-sm shadow-rose-500/40 ring-2 ring-white dark:ring-[#020617]">
+                  {notificationCount > 9 ? '9+' : notificationCount}
                 </span>
               )}
             </button>
+            {isNotificationsOpen && (
+              <NotificationsPopover
+                ref={popoverRef}
+                anchorRect={notificationsAnchor}
+                assignments={assignments}
+                subjects={subjects}
+                onClose={() => setIsNotificationsOpen(false)}
+              />
+            )}
             <div className="mx-1 hidden h-6 w-px bg-slate-200 dark:bg-slate-800 sm:block" />
             <button
               type="button"

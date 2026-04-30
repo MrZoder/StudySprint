@@ -1,3 +1,22 @@
+/**
+ * AssignmentCard — the workhorse of the Assignments page.
+ * -----------------------------------------------------------------------------
+ * Every action a student can take on a single assignment is hosted here:
+ *   - Toggle whole-assignment complete (sentinel handling for empty subtasks)
+ *   - CRUD on subtasks (add, rename, delete, reorder)
+ *   - Inline link to the detail page
+ *   - Delete with confirmation dialog
+ *
+ * Visual rules:
+ *   - Tone shifts based on `Status` (completed → green, overdue → rose,
+ *     urgent → blue, otherwise neutral).
+ *   - Confetti burst + pulse animation when the user just hit 100 %.
+ *   - The id="assignment-<id>" anchor is what the notifications popover and
+ *     deep links target for scroll-into-view.
+ *
+ * A lot of UI is conditionally compact via the `density` prop so the card
+ * fits both Dashboard rails and the wider Assignments grid.
+ */
 import type { Assignment, Subject, Subtask } from '../types';
 import { format, isPast } from 'date-fns';
 import {
@@ -365,6 +384,7 @@ export default function AssignmentCard({
 
   return (
     <div
+      id={`assignment-${assignment.id}`}
       className={cn(
         'group relative isolate overflow-hidden rounded-2xl border transition-all duration-300',
         density === 'compact' ? 'p-3' : 'p-3.5',
@@ -378,6 +398,7 @@ export default function AssignmentCard({
           'ring-2 ring-blue-400/70 ring-offset-2 ring-offset-white dark:ring-blue-500/60 dark:ring-offset-[#020617]',
         ringCard && captureCardFrame(),
       )}
+      style={{ scrollMarginTop: '6rem' }}
     >
       {/* Confetti burst on full completion */}
       {cardCelebrating && <ConfettiBurst />}

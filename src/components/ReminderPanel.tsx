@@ -1,3 +1,14 @@
+/**
+ * ReminderPanel — the hero/briefing card at the top of the Dashboard.
+ * -----------------------------------------------------------------------------
+ * Two columns:
+ *   - Left: situational headline + workload chips + primary actions.
+ *   - Right: completion ring + "next deadline" / "focus today" rows.
+ *
+ * The headline copy adapts to the student's current state (overdue, busy,
+ * calm, almost-done). `heroCopy` codifies those branches so the wording stays
+ * predictable instead of generic.
+ */
 import {
   AlertTriangle,
   BellRing,

@@ -1,3 +1,19 @@
+/**
+ * Select — accessible custom dropdown, drop-in for native <select>.
+ * -----------------------------------------------------------------------------
+ * Why custom: native <select> dropdowns can't be styled to match our dark
+ * theme on most platforms, and they don't support rich option content.
+ *
+ * What it does:
+ *   - Accepts the same `<option>` children + props as a native select, so it
+ *     plugs into existing forms without API changes.
+ *   - Mirrors the chosen value into a hidden native <select> so form
+ *     submission, refs, and validation keep working unchanged.
+ *   - Renders the menu through a body portal at fixed coords so it can
+ *     escape any clipping ancestor (modals, scroll containers).
+ *   - Auto-flips above the trigger when there isn't room below.
+ *   - Full keyboard support: ArrowUp/Down, Home/End, Enter/Space, Esc, Tab.
+ */
 import {
   Children,
   isValidElement,
@@ -20,6 +36,7 @@ interface SelectProps extends SelectHTMLAttributes<HTMLSelectElement> {
   hasError?: boolean;
 }
 
+/** Internal flat representation of a child <option>. */
 interface OptionItem {
   key: string;
   value: string;
@@ -27,12 +44,17 @@ interface OptionItem {
   disabled?: boolean;
 }
 
+/** Computed positioning for the portaled menu (top/bottom flip + clamping). */
 interface MenuPosition {
   style: CSSProperties;
   placement: "top" | "bottom";
   maxHeight: number;
 }
 
+/**
+ * Walk children once, picking out the <option> elements and capturing the
+ * fields we actually need. Anything else (whitespace, comments) is ignored.
+ */
 function toOptionItems(children: ReactNode): OptionItem[] {
   return Children.toArray(children).flatMap((child, index) => {
     if (!isValidElement(child) || child.type !== "option") return [];

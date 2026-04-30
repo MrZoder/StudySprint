@@ -1,3 +1,9 @@
+/**
+ * StatCard — KPI tile used on the Dashboard grid.
+ * Five tones (blue/amber/rose/emerald/slate) keyed to the metric's mood.
+ * The vertical accent rail is the only chromatic element so a row of cards
+ * still reads as a unit; the value and label stay neutral.
+ */
 import type { ReactNode } from "react";
 import { cn } from "../lib/utils";
 

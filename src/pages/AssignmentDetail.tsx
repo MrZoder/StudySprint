@@ -1,3 +1,14 @@
+/**
+ * AssignmentDetail — single assignment editor (/assignments/:id).
+ * -----------------------------------------------------------------------------
+ * Detail/edit view loaded by id from the route. Lets the student rename,
+ * change subject/priority/due date, edit notes, and manage subtasks via the
+ * embedded AssignmentCard. Save validates against the same rules as the
+ * Quick Add form on /assignments (title not blank/duplicate, real due date).
+ *
+ * Navigates back to /assignments after delete with an undo toast wired up
+ * through PlannerContext.restoreAssignment.
+ */
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { ArrowLeft, Save, Trash2 } from "lucide-react";

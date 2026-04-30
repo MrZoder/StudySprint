@@ -1,6 +1,19 @@
+/**
+ * Planner store contract.
+ * -----------------------------------------------------------------------------
+ * Splitting the context object out of `PlannerContext.tsx` keeps the shape of
+ * the store importable without pulling in the provider tree (and its
+ * localStorage / mock-data dependencies). The `usePlanner` hook reads from
+ * here; only `PlannerProvider` writes to it.
+ */
 import { createContext } from "react";
 import type { Assignment, Subject } from "../types";
 
+/**
+ * Everything a consumer can read or do with the planner store. Each action
+ * keeps `progress` and `status` in sync via `withDerivedValues` inside the
+ * provider — callers should never have to compute those themselves.
+ */
 export interface PlannerContextValue {
   subjects: Subject[];
   assignments: Assignment[];

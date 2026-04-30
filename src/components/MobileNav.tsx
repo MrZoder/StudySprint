@@ -1,3 +1,9 @@
+/**
+ * MobileNav — bottom tab bar shown only on lg- screens.
+ * Five tabs covering the most-trafficked routes; the AI planner gets a
+ * violet accent because it's the headline feature. Sits above the
+ * safe-area-inset on iOS using `env(safe-area-inset-bottom)`.
+ */
 import { NavLink } from "react-router-dom";
 import { LayoutDashboard, CheckSquare, CalendarDays, BookOpen, Wand2 } from "lucide-react";
 import { cn } from "../lib/utils";

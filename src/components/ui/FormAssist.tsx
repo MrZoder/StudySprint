@@ -1,3 +1,9 @@
+/**
+ * FormAssist — richer counterpart to ValidationMessage.
+ * Same conditional-render pattern but with four tones (error, warning,
+ * success, muted) and an icon. Use it whenever a field needs to convey more
+ * than a hard validation failure.
+ */
 import { AlertCircle, CheckCircle2 } from "lucide-react";
 import { cn } from "../../lib/utils";
 

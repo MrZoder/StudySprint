@@ -1,3 +1,12 @@
+/**
+ * Modal — full-screen overlay dialog primitive.
+ * -----------------------------------------------------------------------------
+ * Renders through a body-level portal so it always sits above page content
+ * (z-[200], above toasts at z-[60] and notifications popover at z-[100]).
+ * Locks body scroll while open. Backdrop click + close button both trigger
+ * onClose. Mobile-first: bottom-sheet on narrow screens, centred dialog on
+ * sm+. Pair with ConfirmationDialog for destructive flows.
+ */
 import { useEffect, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { X } from "lucide-react";

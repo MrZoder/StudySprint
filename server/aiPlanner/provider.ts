@@ -239,7 +239,7 @@ function normaliseAnalysis(raw: unknown, model: string): BriefAnalysis {
           .filter(Boolean)
           .slice(0, 8)
       : [],
-    dueDateISO: optionalString(r.dueDateISO),
+    dueDateISO: validISODate(r.dueDateISO),
     dueDatePhrase: optionalString(r.dueDatePhrase),
     wordCount:
       typeof r.wordCount === "number" && Number.isFinite(r.wordCount) && r.wordCount > 0
@@ -313,6 +313,22 @@ function s(v: unknown, fallback: string): string {
 function optionalString(v: unknown): string | undefined {
   if (typeof v === "string" && v.trim()) return v.trim();
   return undefined;
+}
+
+/**
+ * Only keep dueDateISO when it parses to a real calendar date. LLMs occasionally
+ * return placeholders like "TBA", "Week 8", or partial strings like "2025-13";
+ * letting those reach the UI causes `format(new Date(value))` to throw
+ * "Invalid time value" and crash the planner page. Falling back to `undefined`
+ * means the UI will render the human-readable `dueDatePhrase` instead.
+ */
+function validISODate(v: unknown): string | undefined {
+  const raw = optionalString(v);
+  if (!raw) return undefined;
+  const time = Date.parse(raw);
+  if (Number.isNaN(time)) return undefined;
+  // Re-emit in canonical ISO form so the client always parses cleanly.
+  return new Date(time).toISOString();
 }
 
 /* The LLM doesn't need to author the timeline — it's a consistent visual

@@ -1,3 +1,19 @@
+/**
+ * Top-level application shell.
+ * -----------------------------------------------------------------------------
+ * Wires three concerns in a fixed order:
+ *   1. Providers   — Theme, Planner state, Toast notifications. Wrapping order
+ *                    matters: Theme is outermost (no deps), Toast innermost
+ *                    (so any other provider can call showToast).
+ *   2. Router      — BrowserRouter, sits inside providers so the planner
+ *                    state survives navigation.
+ *   3. Routes      — Public landing page at /, all authenticated app surfaces
+ *                    nested under DashboardLayout (which provides the topbar,
+ *                    sidebar, and main scroll area).
+ *
+ * `assignments/:id` is the only dynamic route — used by AssignmentDetail to
+ * deep-link into a specific card.
+ */
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import DashboardLayout from './layouts/DashboardLayout';
 import Dashboard from './pages/Dashboard';
@@ -19,7 +35,9 @@ function App() {
         <ToastProvider>
           <BrowserRouter>
             <Routes>
+              {/* Public marketing page. */}
               <Route path="/" element={<Landing />} />
+              {/* Authenticated app surfaces — share the dashboard chrome. */}
               <Route element={<DashboardLayout />}>
                 <Route path="dashboard" element={<Dashboard />} />
                 <Route path="subjects" element={<Subjects />} />

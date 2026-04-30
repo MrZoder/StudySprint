@@ -1,3 +1,10 @@
+/**
+ * PlannerAssignmentChip — compact assignment row for calendar cells and rails.
+ * Carries enough info for triage at a glance (subject colour, priority dot,
+ * title, due hint, mini progress bar) without taking the room a full
+ * AssignmentCard would. The optional reschedule button on the right reveals
+ * on hover (desktop) or is always tap-sized on mobile.
+ */
 import { Link } from "react-router-dom";
 import { CalendarClock, Clock } from "lucide-react";
 import type { Assignment, Subject } from "../types";

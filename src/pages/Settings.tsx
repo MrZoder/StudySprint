@@ -1,3 +1,9 @@
+/**
+ * Settings — minimal preferences page (/settings).
+ * Currently only exposes the two things the local-demo app actually has:
+ * theme toggle and a localStorage reset. Reset clears the planner store key
+ * and reloads so the next mount re-seeds with MOCK_SUBJECTS / MOCK_ASSIGNMENTS.
+ */
 import { useTheme } from "../context/useTheme";
 import { RotateCcw, Moon, Sun } from "lucide-react";
 import Button from "../components/ui/Button";

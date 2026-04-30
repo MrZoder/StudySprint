@@ -1,3 +1,9 @@
+/**
+ * SubjectPill — consistent subject identifier badge.
+ * Renders the subject's accent dot + code (e.g. "CS301") using the shared
+ * theme from `getSubjectTheme`. Returns null if no subject so callers can
+ * pass `assignment` lookups without guarding.
+ */
 import type { Subject } from "../../types";
 import { getSubjectTheme } from "../../lib/subjectStyles";
 import { cn } from "../../lib/utils";

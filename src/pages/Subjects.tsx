@@ -1,3 +1,15 @@
+/**
+ * Subjects — manage the units the student is studying (/subjects).
+ * -----------------------------------------------------------------------------
+ * Two-column layout: subject list on the left, add/edit form on the right.
+ * Deleting a subject also drops every assignment attached to it (handled by
+ * `deleteSubject` in the planner store), and a confirmation dialog gates that
+ * destructive action.
+ *
+ * `COLOR_OPTIONS` is the curated palette students choose from; the Tailwind
+ * utility (e.g. `bg-blue-500`) is what gets stored on Subject.color and is
+ * later mapped to a full theme by getSubjectTheme.
+ */
 import { useEffect, useMemo, useState } from 'react';
 import { BookOpen, Trash2, Pencil, X, ChevronDown, Check } from 'lucide-react';
 import { cn } from '../lib/utils';

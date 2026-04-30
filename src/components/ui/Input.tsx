@@ -1,3 +1,9 @@
+/**
+ * Input — text input primitive with light/dark + error styling.
+ * `forwardRef` so forms can imperatively focus, validate, or scroll into
+ * view. `hasError` flips the border tone but doesn't render the message —
+ * pair with <ValidationMessage> for that.
+ */
 import { forwardRef, type InputHTMLAttributes } from "react";
 import { cn } from "../../lib/utils";
 

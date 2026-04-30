@@ -1,3 +1,8 @@
+/**
+ * Convenience hook for reading the planner store.
+ * Throws if used outside `<PlannerProvider>`, which surfaces wiring bugs at
+ * mount time instead of producing silent undefined behaviour.
+ */
 import { useContext } from "react";
 import { PlannerContext } from "./plannerStoreContext";
 

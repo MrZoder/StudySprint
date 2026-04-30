@@ -1,3 +1,17 @@
+/**
+ * Calendar — week-at-a-glance planner view (/calendar).
+ * -----------------------------------------------------------------------------
+ * Three-pane layout (mobile collapses to a single column):
+ *   - Header strip: week navigator, "today" jump, mode summary.
+ *   - Day grid:    seven columns, one per day; each day shows its
+ *                  PlannerAssignmentChips, sorted by priority then time.
+ *   - Right rail:  workload distribution, focus pick, and a "rebalance"
+ *                  hint when one day is visibly heavier than the others.
+ *
+ * The page is read-mostly — interactions are limited to navigation between
+ * weeks and click-through to assignment detail. Reschedule is exposed via the
+ * chip's reschedule button which opens a quick date picker.
+ */
 import { useMemo, useState } from "react";
 import {
   AlertTriangle,

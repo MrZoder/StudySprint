@@ -1,3 +1,9 @@
+/**
+ * Button — the canonical button primitive.
+ * Five variants (primary, secondary, danger, dangerFill, ghost) and two sizes
+ * cover the entire app. Always renders a real <button>, so callers get the
+ * full button HTML attribute surface (form, type, disabled, …) for free.
+ */
 import type { ButtonHTMLAttributes, ReactNode } from "react";
 import { cn } from "../../lib/utils";
 

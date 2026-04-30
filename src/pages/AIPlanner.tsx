@@ -202,6 +202,22 @@ function phaseTheme(phaseId: string | undefined): PhaseTheme {
   return (PHASE_THEME as Record<string, PhaseTheme | undefined>)[phaseId] ?? FALLBACK_PHASE;
 }
 
+/**
+ * Safe wrapper around `format(new Date(...), pattern)`. Returns the fallback
+ * string when the input doesn't parse as a real date instead of letting
+ * date-fns throw `RangeError: Invalid time value` and crashing the page.
+ *
+ * The server normalises `dueDateISO` before sending it, but this gives the UI
+ * a second line of defence in case persisted state, third-party imports, or a
+ * future provider returns something unparseable.
+ */
+function safeFormat(value: string | undefined, pattern: string, fallback = ""): string {
+  if (!value) return fallback;
+  const time = Date.parse(value);
+  if (Number.isNaN(time)) return fallback;
+  return format(new Date(time), pattern);
+}
+
 /** Split the first sentence off a summary so we can render it as a hero line. */
 function splitSummary(summary: string): { hero: string; rest: string } {
   const trimmed = summary.trim();
@@ -359,11 +375,7 @@ export default function AIPlanner() {
       setIncludedStageIds(new Set(result.analysis.stages.map((s) => s.id)));
       setSelectedStageId(result.analysis.stages[0]?.id ?? null);
       setEditedTitle(result.analysis.title);
-      setEditedDueDate(
-        result.analysis.dueDateISO
-          ? format(new Date(result.analysis.dueDateISO), "yyyy-MM-dd")
-          : "",
-      );
+      setEditedDueDate(safeFormat(result.analysis.dueDateISO, "yyyy-MM-dd"));
       setSubjectId((prev) => prev || subjects[0]?.id || "");
 
       if (result.fallbackReason) {
@@ -1052,9 +1064,8 @@ function SummaryCard({ analysis }: { analysis: BriefAnalysis }) {
               icon={<CalendarIcon size={13} />}
               label="Due"
               value={
-                analysis.dueDateISO
-                  ? format(new Date(analysis.dueDateISO), "EEE d MMM yyyy")
-                  : analysis.dueDatePhrase
+                safeFormat(analysis.dueDateISO, "EEE d MMM yyyy") ||
+                analysis.dueDatePhrase
               }
               sub={
                 analysis.dueDateISO && analysis.dueDatePhrase
@@ -1706,12 +1717,12 @@ function TimelineCard({
             From today to submission
           </h3>
         </div>
-        {dueDateISO && (
+        {safeFormat(dueDateISO, "EEE d MMM") && (
           <p className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50/70 px-3 py-1.5 text-[11.5px] font-medium text-slate-600 dark:border-slate-800 dark:bg-slate-900/50 dark:text-slate-300">
             <Flag size={11} className="text-violet-500 dark:text-violet-300" />
             Submit by{" "}
             <span className="text-slate-900 dark:text-white">
-              {format(new Date(dueDateISO), "EEE d MMM")}
+              {safeFormat(dueDateISO, "EEE d MMM")}
             </span>
           </p>
         )}
@@ -1850,9 +1861,8 @@ function StatusCard({ analysis }: { analysis: BriefAnalysis }) {
         {analysis.dueDatePhrase && (
           <RailRow label="Due">
             <span className="font-medium text-slate-800 dark:text-slate-100">
-              {analysis.dueDateISO
-                ? format(new Date(analysis.dueDateISO), "EEE d MMM")
-                : analysis.dueDatePhrase}
+              {safeFormat(analysis.dueDateISO, "EEE d MMM") ||
+                analysis.dueDatePhrase}
             </span>
           </RailRow>
         )}
@@ -2002,11 +2012,11 @@ function PacingRailCard({
           );
         })}
       </ol>
-      {dueDateISO && (
+      {safeFormat(dueDateISO, "EEE d MMM") && (
         <p className="mt-3 border-t border-slate-100 pt-2.5 text-[11px] text-slate-500 dark:border-slate-800/80 dark:text-slate-400">
           Submit by{" "}
           <span className="font-semibold text-slate-700 dark:text-slate-200">
-            {format(new Date(dueDateISO), "EEE d MMM")}
+            {safeFormat(dueDateISO, "EEE d MMM")}
           </span>
         </p>
       )}

@@ -1,3 +1,17 @@
+/**
+ * Assignments — full CRUD page for coursework.
+ * -----------------------------------------------------------------------------
+ * The "command center" for the day-to-day workflow:
+ *   - Tabs (All / Active / Completed) + status / priority / subject filters
+ *   - Sort by due date or priority
+ *   - Search box
+ *   - Quick-add form on the right rail (title, subject, due, priority, notes)
+ *   - Assignment grid using AssignmentCard
+ *
+ * Deep-link support: when navigated here with a hash like
+ * `/assignments#assignment-<id>` (e.g. from the notifications popover), an
+ * effect scrolls the matching card into view and gives it a brief violet ring.
+ */
 import {
   useCallback,
   useEffect,
@@ -6,7 +20,7 @@ import {
   useRef,
   useState,
 } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import type { Assignment, Priority, Status } from '../types';
 import AssignmentCard from '../components/AssignmentCard';
 import {
@@ -108,6 +122,27 @@ export default function Assignments() {
     restoreAssignment,
   } = usePlanner();
   const { showToast } = useToast();
+  const location = useLocation();
+
+  // Smoothly scroll to a specific assignment when navigated here from a
+  // notification, search result, or any other deep link of the form
+  // /assignments#assignment-<id>. Two rAF ticks let the list mount first.
+  useEffect(() => {
+    if (!location.hash) return;
+    const id = location.hash.slice(1);
+    if (!id) return;
+    const tryScroll = () => {
+      const el = document.getElementById(id);
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        el.classList.add('ring-2', 'ring-violet-400/60', 'ring-offset-2', 'dark:ring-offset-[#020617]');
+        window.setTimeout(() => {
+          el.classList.remove('ring-2', 'ring-violet-400/60', 'ring-offset-2', 'dark:ring-offset-[#020617]');
+        }, 1800);
+      }
+    };
+    requestAnimationFrame(() => requestAnimationFrame(tryScroll));
+  }, [location.hash, assignments]);
 
   const handleDeleteAssignment = useCallback(
     (assignmentId: string) => {

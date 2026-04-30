@@ -1,3 +1,4 @@
+/** Hook for showing/dismissing toasts. Must be used inside ToastProvider. */
 import { useContext } from "react";
 import { ToastContext } from "./toastStoreContext";
 
