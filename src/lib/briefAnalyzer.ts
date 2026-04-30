@@ -171,6 +171,7 @@ const MONTHS = [
 ];
 const MONTH_SHORT = MONTHS.map((m) => m.slice(0, 3));
 
+/** Map a "January" / "Jan" string to its 0-indexed month number, else null. */
 function parseMonth(name: string): number | null {
   const lower = name.toLowerCase();
   let idx = MONTHS.indexOf(lower);
@@ -179,6 +180,14 @@ function parseMonth(name: string): number | null {
   return idx >= 0 ? idx : null;
 }
 
+/**
+ * Try to pull a due date out of free-form brief text. Patterns are tried from
+ * most specific (ISO 8601, dd/mm/yyyy) to most lenient (named months, "in N
+ * days/weeks"). Returns both the parsed ISO string and the verbatim phrase so
+ * the UI can show what it matched against. When no year is present and the
+ * resulting date falls in the past, we roll forward by one year — a brief
+ * referencing "15 March" written in November almost always means *next* March.
+ */
 function extractDueDate(text: string, now: Date): { iso?: string; phrase?: string } {
   const windowed = text.replace(/\s+/g, " ").toLowerCase();
 
@@ -237,6 +246,14 @@ function extractDueDate(text: string, now: Date): { iso?: string; phrase?: strin
 
 /* ------------------------------ Title + summary --------------------------- */
 
+/**
+ * Best-effort assignment title extraction:
+ *   1. Look for an explicit "Title:" / "Topic:" / "Assignment Title:" label.
+ *   2. Fall back to the first non-empty line of the brief if it's a sensible
+ *      length (6–110 chars).
+ *   3. Last resort: derive a generic title from the primary deliverable
+ *      (e.g. "Essay assignment").
+ */
 function extractTitle(text: string, deliverables: Deliverable[]): string {
   const trimmed = text.trim();
   if (!trimmed) return "Untitled assignment";
@@ -258,6 +275,12 @@ function extractTitle(text: string, deliverables: Deliverable[]): string {
   return primary ? `${primary.label} assignment` : "Assignment brief";
 }
 
+/**
+ * Compose the plain-language summary the UI shows under "What you've been
+ * asked to do". Mixes the detected deliverable types, key constraints, and
+ * deadline cue into 2–3 short sentences — never invents content the brief
+ * didn't supply.
+ */
 function buildSummary(
   deliverables: Deliverable[],
   requirements: Requirement[],
@@ -649,6 +672,15 @@ const SECTION_LIBRARY: Partial<Record<DeliverableType, string[]>> = {
   ],
 };
 
+/**
+ * Extract criteria the brief / rubric implies the work will be marked against.
+ * Combines two strategies:
+ *   1. Regex sweep for "<criterion> <weight>%" patterns to capture explicit
+ *      weighting from a marking table.
+ *   2. Lookup of common rubric vocabulary (analysis, argument, presentation,
+ *      …) to surface unweighted criteria with stock guidance.
+ * Returns at most 8 signals so the UI panel stays scannable.
+ */
 function deriveRubricSignals(text: string): RubricSignal[] {
   const signals: RubricSignal[] = [];
   // Pattern: "criterion 25%" / "analysis 35%"
@@ -700,6 +732,7 @@ function titleCase(s: string): string {
 
 /* --------------------------------- Core ----------------------------------- */
 
+/** Run every deliverable keyword set against the brief; default to a generic "other" if none match. */
 function detectDeliverables(text: string): Deliverable[] {
   const found: Deliverable[] = [];
   for (const entry of DELIVERABLE_KEYWORDS) {
@@ -711,6 +744,11 @@ function detectDeliverables(text: string): Deliverable[] {
   return found;
 }
 
+/**
+ * Pull constraints out of the brief — references, formatting, group work,
+ * submission method, etc. Word count gets prepended as its own requirement so
+ * it appears at the top of the requirements panel when present.
+ */
 function detectRequirements(text: string, wordCount?: number): Requirement[] {
   const found: Requirement[] = [];
   if (wordCount) {
@@ -733,12 +771,20 @@ function detectRequirements(text: string, wordCount?: number): Requirement[] {
   });
 }
 
+/** Find an explicit word-count target like "2,500 words" or "1500 word count". */
 function extractWordCount(text: string): number | undefined {
   const m = text.match(/(\d{3,5})\s*(?:-\s*\d{3,5}\s*)?\b(?:words?|word\s*count|wc)\b/i);
   if (m) return Number(m[1]);
   return undefined;
 }
 
+/**
+ * Build the staged action plan by walking the stage templates and including
+ * those that either are flagged `alwaysInclude` or that match one of the
+ * detected deliverable types. The result is preserved in template-defined
+ * order so the plan reads like a natural sequence (understand → research →
+ * draft → refine → polish).
+ */
 function composeStages(deliverables: Deliverable[]): PlanStage[] {
   const types = new Set(deliverables.map((d) => d.type));
   const stages: PlanStage[] = [];
@@ -757,6 +803,7 @@ function composeStages(deliverables: Deliverable[]): PlanStage[] {
   return stages;
 }
 
+/** Merge the universal tips with deliverable-specific ones; cap at 6 to stay digestible. */
 function buildTips(deliverables: Deliverable[]): string[] {
   const tips: string[] = [...GENERAL_TIPS];
   for (const d of deliverables) {
@@ -766,6 +813,14 @@ function buildTips(deliverables: Deliverable[]): string[] {
   return Array.from(new Set(tips)).slice(0, 6);
 }
 
+/**
+ * Honest self-assessment of how confident the heuristic engine is in its
+ * interpretation. We give one point for each clear signal we found
+ * (substantial text, identified deliverable, ≥2 requirements, due date) and
+ * bucket the result into low / medium / high. This drives the confidence
+ * badge in the UI so students don't over-trust an analysis built from a
+ * one-line brief.
+ */
 function gradeConfidence(
   deliverables: Deliverable[],
   requirements: Requirement[],
@@ -783,6 +838,12 @@ function gradeConfidence(
   return "low";
 }
 
+/**
+ * Rough total-hours estimate: ~250 words/hour for writing tasks, plus a
+ * deliverable-specific surcharge for research depth, code, presentation
+ * rehearsal, etc. Returns undefined when nothing is detectable so the UI
+ * can hide the field rather than fabricate a number.
+ */
 function estimateHours(deliverables: Deliverable[], wordCount?: number): number | undefined {
   let hours = 0;
   if (wordCount) hours += Math.round(wordCount / 250);
@@ -799,6 +860,13 @@ function estimateHours(deliverables: Deliverable[], wordCount?: number): number 
   return hours > 0 ? hours : undefined;
 }
 
+/**
+ * Aggregate the section / chapter list each detected deliverable type
+ * typically requires (e.g. report → exec summary, methodology, references)
+ * and return up to 10. Order is roughly the order each deliverable was
+ * detected so multi-deliverable briefs (report + presentation) keep a
+ * coherent outline.
+ */
 function buildRequiredSections(deliverables: Deliverable[]): string[] {
   const sections = new Set<string>();
   for (const d of deliverables) {
@@ -808,6 +876,12 @@ function buildRequiredSections(deliverables: Deliverable[]): string[] {
   return Array.from(sections).slice(0, 10);
 }
 
+/**
+ * Surface the things the brief *doesn't* clearly state — explicit honesty is
+ * a core product principle so the student never assumes a fabricated date or
+ * word count is real. Each missing field becomes one human-readable line in
+ * the UI's "Worth confirming" panel.
+ */
 function buildMissingDetails(
   text: string,
   wordCount: number | undefined,
@@ -828,6 +902,12 @@ function buildMissingDetails(
   return missing;
 }
 
+/**
+ * Build the per-field confidence flags rendered in the validation strip. The
+ * heuristic engine only ever emits "confirmed" or "missing" — it can't tell
+ * "inferred" from "explicit" the way an LLM can — so the UI's three-state
+ * design accepts the simpler binary from this code path.
+ */
 function buildSignals(
   wordCount: number | undefined,
   dueDateISO: string | undefined,
@@ -845,6 +925,12 @@ function buildSignals(
 
 /* ---------------------------------- API ---------------------------------- */
 
+/**
+ * Public entry point — turn raw brief text into a fully-shaped
+ * `BriefAnalysis`. Orchestrates every helper above in a single pass and
+ * tags the result with `source: "heuristic"` so the UI can show a faithful
+ * "On-device planner" badge instead of pretending to be an LLM.
+ */
 export function analyzeBrief(
   briefText: string,
   opts: { now?: Date } = {},
@@ -907,6 +993,15 @@ export interface PhaseDateRange {
   endLabel: string;
 }
 
+/**
+ * Spread the abstract timeline phases (Discover → Polish) across a real
+ * calendar window. Each phase consumes a portion of the window proportional
+ * to its `endPortion`, so a longer runway gives the student more time per
+ * phase while a tight deadline compresses everything proportionally.
+ *
+ * Returns `null` when there's no due date — the UI then hides the timeline
+ * card rather than showing a meaningless "today → today" strip.
+ */
 export function projectTimeline(
   timeline: TimelinePhase[],
   to?: string,

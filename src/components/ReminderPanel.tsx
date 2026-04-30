@@ -34,6 +34,22 @@ interface ReminderPanelProps {
   weekRangeLabel?: string;
 }
 
+/**
+ * Decide which preset hero block to display based on the student's current
+ * workload signals. Branches are ordered from most-pressing to most-relaxed
+ * so the first match wins:
+ *
+ *   1. No active work     → "All clear" (calm)
+ *   2. Anything overdue   → "Overdue work needs the first slot." (alert)
+ *   3. ≥4 due soon        → "Sequence small wins." (warn)
+ *   4. 1–3 due soon       → "Stay ahead." (focus)
+ *   5. Strong momentum    → "Protect the progress." (focus)
+ *   6. Almost finished    → "Close the loop." (focus)
+ *   7. Default steady     → "Steady rhythm." (calm)
+ *
+ * The chosen `mood` then drives an accent palette (rose / amber / blue /
+ * emerald) for a coherent visual signal alongside the copy.
+ */
 function heroCopy(params: {
   overdueCount: number;
   dueSoonCount: number;

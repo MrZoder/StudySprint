@@ -65,6 +65,15 @@ const NotificationsPopover = forwardRef<HTMLDivElement, NotificationsPopoverProp
 ) {
   const navigate = useNavigate();
 
+  // Bucket every active assignment into one of two categories used by the
+  // popover sections:
+  //   - overdue : flagged Overdue OR past-due with a negative day-delta.
+  //               The status check matters because deriveStatus treats a
+  //               same-day deadline as still-on-time, but we still want to
+  //               surface it in the "Due soon" group below.
+  //   - dueSoon : not overdue and within seven calendar days.
+  // Each group is then sorted earliest-first so the most urgent surface at
+  // the top of its section. Completed work is skipped entirely.
   const { overdue, dueSoon, totalCount } = useMemo(() => {
     const now = new Date();
     const overdue: NotificationItem[] = [];
@@ -102,6 +111,11 @@ const NotificationsPopover = forwardRef<HTMLDivElement, NotificationsPopoverProp
     return { overdue, dueSoon, totalCount: overdue.length + dueSoon.length };
   }, [assignments, subjects]);
 
+  /**
+   * Close the popover and deep-link into /assignments with the row's id in
+   * the hash. The Assignments page reads `location.hash` and scrolls the
+   * matching card into view with a brief highlight ring.
+   */
   function goToAssignment(id: string) {
     onClose();
     navigate(`/assignments#assignment-${id}`);

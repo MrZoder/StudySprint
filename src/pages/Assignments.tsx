@@ -144,6 +144,13 @@ export default function Assignments() {
     requestAnimationFrame(() => requestAnimationFrame(tryScroll));
   }, [location.hash, assignments]);
 
+  /**
+   * Delete an assignment with an undo affordance. We snapshot the full
+   * assignment (including subtasks/progress) *before* the delete so the
+   * "Undo" toast can put it back exactly as it was. The 8 s window is
+   * deliberately longer than the default toast so a distracted student
+   * still has time to react.
+   */
   const handleDeleteAssignment = useCallback(
     (assignmentId: string) => {
       const snap = assignments.find((a) => a.id === assignmentId);
@@ -181,6 +188,11 @@ export default function Assignments() {
   const [assignmentSuccess, setAssignmentSuccess] = useState<string | null>(null);
   const quickAddTitleRef = useRef<HTMLInputElement | null>(null);
 
+  /**
+   * Move keyboard focus + viewport to the right-rail quick-add title input.
+   * Wrapped in rAF so the focus call happens after React commits the state
+   * change above (otherwise scrollIntoView can race the layout pass).
+   */
   const focusQuickAdd = useCallback(() => {
     setFocusedId(null);
     requestAnimationFrame(() => {
@@ -266,6 +278,11 @@ export default function Assignments() {
     },
   ];
 
+  // Build the visible list by stacking filters in priority order:
+  //   1. Tab (All / Active / Completed)   — broad bucket.
+  //   2. Status / priority / subject pills — narrow chips on the toolbar.
+  //   3. Search                            — title, subject name, subject code.
+  // Then sort by due date direction. Recomputes only when an input changes.
   const filteredAssignments = useMemo(
     () =>
       assignments

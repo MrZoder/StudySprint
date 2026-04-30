@@ -22,6 +22,7 @@ type SearchRow =
   | { kind: "assignment"; assignment: Assignment; subject?: Subject }
   | { kind: "subject"; subject: Subject };
 
+/** Does the assignment (or its subject's name/code) contain the query? Case-insensitive substring match. */
 function matchesQuery(q: string, assignment: Assignment, subject: Subject | undefined): boolean {
   if (!q) return false;
   const n = q.toLowerCase();
@@ -31,6 +32,7 @@ function matchesQuery(q: string, assignment: Assignment, subject: Subject | unde
   return false;
 }
 
+/** Does the subject's name or code contain the query? Used for the standalone subject results section. */
 function subjectMatchesQuery(q: string, subject: Subject): boolean {
   if (!q) return false;
   const n = q.toLowerCase();
@@ -59,6 +61,10 @@ export default function GlobalTopbarSearch({ className }: GlobalTopbarSearchProp
 
   const q = query.trim().toLowerCase();
 
+  // Build the result list: assignment matches first (sorted earliest-due,
+  // capped at 8) then subject matches (alphabetical, capped at 5). The two
+  // groups are concatenated so the keyboard navigation index can sweep
+  // through everything as one flat list.
   const rows = useMemo((): SearchRow[] => {
     if (!q) return [];
     const assignmentRows: SearchRow[] = assignments
@@ -113,6 +119,12 @@ export default function GlobalTopbarSearch({ className }: GlobalTopbarSearchProp
     return () => document.removeEventListener("mousedown", onPointerDown);
   }, [open]);
 
+  /**
+   * Combobox keyboard model. While the panel is closed we let typed text
+   * flow through normally; ArrowDown/Enter open the panel, Escape clears
+   * the query. Once open: Escape closes, ArrowUp/Down wrap-navigate the
+   * results, and Enter activates the highlighted row.
+   */
   const onKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (!open && (e.key === "ArrowDown" || e.key === "Enter") && query.trim()) {
       setOpen(true);

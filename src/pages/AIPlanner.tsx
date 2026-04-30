@@ -287,6 +287,13 @@ export default function AIPlanner() {
 
   /* --------------------------- Input interactions --------------------------- */
 
+  /**
+   * Run a dropped or picked file through the client-side extractor. We pull
+   * the text into the brief textarea instead of sending the raw file to the
+   * server so the user can review/edit the extracted text before triggering
+   * the AI call. Errors (encrypted PDF, scanned image, oversized file) are
+   * surfaced both inline and as a toast.
+   */
   async function handleFile(file: File | null | undefined) {
     if (!file) return;
     setExtractionError(null);
@@ -316,6 +323,7 @@ export default function AIPlanner() {
     }
   }
 
+  /** Drag-and-drop handler for the upload zone — first file wins. */
   function handleDrop(event: DragEvent<HTMLDivElement>) {
     event.preventDefault();
     setIsDragging(false);
@@ -323,18 +331,25 @@ export default function AIPlanner() {
     void handleFile(file);
   }
 
+  /**
+   * Native file-input change. We reset `event.target.value` so the user can
+   * immediately re-pick the same file after clearing — without that, the
+   * input would fire no change event for an identical name.
+   */
   function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     void handleFile(file);
     event.target.value = "";
   }
 
+  /** Drop the demo brief into the editor so first-time visitors can try the planner without their own file. */
   function handleLoadSample() {
     setBrief(SAMPLE_BRIEF);
     setFileMeta(null);
     setExtractionError(null);
   }
 
+  /** Reset the workspace to its empty state — both the input side and any rendered analysis. */
   function handleClear() {
     setBrief("");
     setFileMeta(null);
@@ -348,6 +363,10 @@ export default function AIPlanner() {
 
   /* ------------------------------- Analysis ------------------------------- */
 
+  // While the analysis is in flight, walk through ANALYSIS_STEPS at ~850 ms
+  // intervals so the progress copy reads as a real sequence ("reading…",
+  // "identifying deliverables…") instead of a static spinner. The interval
+  // clears as soon as `isAnalyzing` flips back to false.
   useEffect(() => {
     if (!isAnalyzing) return;
     setAnalysisStep(0);
@@ -357,6 +376,12 @@ export default function AIPlanner() {
     return () => window.clearInterval(interval);
   }, [isAnalyzing]);
 
+  /**
+   * Kick off the AI Planner request. The fetch helper handles transport and
+   * server fallbacks; this function focuses on UI state: loading, success
+   * (seed the editable plan + due date + subject), and graceful warning when
+   * we ended up on the on-device fallback.
+   */
   async function runAnalysis() {
     if (!canAnalyze) return;
     setIsAnalyzing(true);
@@ -399,6 +424,7 @@ export default function AIPlanner() {
 
   /* --------------------------- Stage interactions --------------------------- */
 
+  /** Add or remove a stage from the "include in conversion" set without mutating the analysis. */
   function toggleStage(stageId: string) {
     setIncludedStageIds((prev) => {
       const next = new Set(prev);
@@ -408,6 +434,7 @@ export default function AIPlanner() {
     });
   }
 
+  /** Drop a single suggested subtask before conversion (e.g. doesn't apply to this brief). */
   function removeSubtask(stageId: string, index: number) {
     if (!analysis) return;
     setAnalysis({
@@ -420,6 +447,7 @@ export default function AIPlanner() {
     });
   }
 
+  /** Inline rename of a generated subtask before it becomes a real assignment subtask. */
   function updateSubtaskText(stageId: string, index: number, value: string) {
     if (!analysis) return;
     setAnalysis({
@@ -432,6 +460,7 @@ export default function AIPlanner() {
     });
   }
 
+  /** Append a placeholder subtask that the student can rename inline. */
   function addSubtask(stageId: string) {
     if (!analysis) return;
     setAnalysis({
@@ -444,6 +473,19 @@ export default function AIPlanner() {
 
   /* ------------------------- Convert to StudySprint ------------------------ */
 
+  /**
+   * Turn the (edited) AI plan into a real StudySprint assignment.
+   *
+   * Strategy:
+   *   - Validate that the student picked a subject and gave a title.
+   *   - Resolve a due date in priority: edited input → analysis-detected ISO
+   *     → 14 days from now as a safe placeholder.
+   *   - Flatten only the *included* stages into prefixed subtask titles
+   *     (e.g. "[Research] Find 5 academic sources") so the subtasks stay
+   *     contextualised inside the assignment view.
+   *   - Hand off to PlannerContext.addAssignment, then navigate the user
+   *     straight into the new card with an "Open" undo-style toast.
+   */
   function handleConvertToAssignment() {
     if (!analysis) return;
     if (!subjectId) {

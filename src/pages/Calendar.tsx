@@ -48,8 +48,10 @@ import Input from "../components/ui/Input";
 import { formatDaysLeft } from "../lib/planner";
 import type { Assignment, Subject } from "../types";
 
+/** Per-day workload bucket. Drives the heatmap colours on each day cell. */
 type Intensity = "quiet" | "light" | "moderate" | "heavy";
 
+/** Map a raw assignment count to a workload bucket. Thresholds are tuned so a typical busy student day reads as "moderate" rather than "heavy". */
 function getIntensity(count: number): Intensity {
   if (count === 0) return "quiet";
   if (count === 1) return "light";
@@ -87,8 +89,10 @@ const intensityMeta: Record<
   },
 };
 
+/** Whole-week workload label rendered next to the planner heading. */
 type WeekLoad = "Quiet" | "Light" | "Moderate" | "Heavy";
 
+/** Convert this week's total deadline count into a label. The thresholds above are intentionally lower than `getIntensity` because a single busy day can already make the *week* feel busy. */
 function getWeekLoad(total: number): WeekLoad {
   if (total === 0) return "Quiet";
   if (total <= 3) return "Light";
@@ -103,6 +107,14 @@ const weekLoadTone: Record<WeekLoad, string> = {
   Heavy: "bg-rose-50 text-rose-700 ring-rose-200 dark:bg-rose-950/40 dark:text-rose-300 dark:ring-rose-900",
 };
 
+/**
+ * Pick an encouraging copy block for a day with no scheduled work. Branches
+ * are ordered so the most context-rich case wins:
+ *   - past day → "no work scheduled" (don't suggest catching up on yesterday)
+ *   - weekend  → "catch-up day"     (acknowledge the rest day)
+ *   - today    → "open day"         (lean forward, suggest momentum)
+ *   - future   → "light study day"  (gentle nudge to use the gap well)
+ */
 function suggestionForEmptyDay(
   day: Date,
   today: Date,
@@ -153,6 +165,9 @@ export default function Calendar() {
     dueInput: string;
   } | null>(null);
 
+  // Monday-aligned week window. We always render exactly seven days and
+  // recompute the day list whenever the reference date moves — this is the
+  // single source of truth the rest of the page derives from.
   const startDate = startOfWeek(referenceDate, { weekStartsOn: 1 });
   const endDate = addDays(startDate, 6);
   const weekDays = useMemo(
@@ -172,6 +187,9 @@ export default function Calendar() {
     return map;
   }, [subjects]);
 
+  // Bucket assignments into one list per visible day, sorted earliest-first
+  // within each day. This memo is the engine behind every per-day rendering
+  // (heatmap colour, chip stacking, busiest-day calculation).
   const perDay = useMemo(() => {
     return weekDays.map((day) =>
       assignments
@@ -222,6 +240,7 @@ export default function Calendar() {
   const selectedDayAssignments = perDay[selectedDayIndex] ?? [];
   const selectedSuggestion = suggestionForEmptyDay(selectedDay, today, firstUpcoming);
 
+  /** Open the inline reschedule modal pre-populated with the assignment's current due date. */
   const openReschedule = (assignment: Assignment) => {
     setRescheduleTarget({
       assignmentId: assignment.id,
@@ -230,6 +249,7 @@ export default function Calendar() {
     });
   };
 
+  /** Commit the new due date. Time is fixed to 12:00 local so subsequent timezone arithmetic doesn't drift across the day boundary. */
   const saveReschedule = () => {
     if (!rescheduleTarget) return;
     const { assignmentId, dueInput } = rescheduleTarget;
@@ -240,6 +260,8 @@ export default function Calendar() {
     setRescheduleTarget(null);
   };
 
+  // Week-by-week navigation. `goToday` also re-syncs the selected day index
+  // so a user jumping back to "today" lands with today highlighted.
   const goPrevWeek = () => setReferenceDate((prev) => addDays(prev, -7));
   const goNextWeek = () => setReferenceDate((prev) => addDays(prev, 7));
   const goToday = () => {

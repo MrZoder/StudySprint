@@ -111,6 +111,8 @@ export default function AssignmentCard({
   const subtaskTools =
     Boolean(onUpdateSubtask && onDeleteSubtask && onMoveSubtask && onToggleSubtask);
 
+  // When the user starts editing a subtask, jump focus into the input and
+  // pre-select its text so the rename gesture feels immediate.
   useEffect(() => {
     if (editingSubtaskId && editInputRef.current) {
       editInputRef.current.focus();
@@ -118,6 +120,10 @@ export default function AssignmentCard({
     }
   }, [editingSubtaskId]);
 
+  // Subtask "celebration" sparkle. We diff the current vs. previous
+  // completion map to find subtasks that just flipped to done, mark them as
+  // celebrating, and schedule the marker to clear ~420 ms later. A ref keeps
+  // the previous snapshot so this effect doesn't depend on derived state.
   useEffect(() => {
     const previousCompletion = previousSubtaskCompletionRef.current;
     const newlyCompleted = assignment.subtasks
@@ -143,6 +149,10 @@ export default function AssignmentCard({
     );
   }, [assignment.subtasks]);
 
+  // Whole-card celebration: fires once when the assignment's status
+  // transitions *into* Completed (not on every re-render, not when reopened).
+  // Held for 1.1 s — long enough to register the win, short enough not to
+  // distract from the next task.
   useEffect(() => {
     if (previousStatusRef.current && previousStatusRef.current !== 'Completed' && assignment.status === 'Completed') {
       setCardCelebrating(true);
@@ -152,6 +162,8 @@ export default function AssignmentCard({
     previousStatusRef.current = assignment.status;
   }, [assignment.status]);
 
+  // Unmount cleanup — clear any pending celebration timers so we never call
+  // setState on a dead component (and never leak window timers).
   useEffect(() => {
     return () => {
       Object.values(celebrationTimeoutsRef.current).forEach((timeoutId) =>
@@ -161,6 +173,8 @@ export default function AssignmentCard({
     };
   }, []);
 
+  // Derived view-model. Status flags drive almost every visual variation
+  // below, so they're computed up front to keep the JSX concise.
   const subject = subjects.find((s) => s.id === assignment.subjectId);
   const dueDate = new Date(assignment.dueDate);
   const isOverdue = isPast(dueDate) && assignment.status !== 'Completed';
@@ -175,6 +189,10 @@ export default function AssignmentCard({
     Urgent: 'border-rose-200/70 bg-rose-50 text-rose-700 dark:border-rose-900/60 dark:bg-rose-950/40 dark:text-rose-200',
   };
 
+  // Card chrome priority order: completed ›overdue › "urgent" emphasis
+  // (used by Dashboard rails) › "calm" emphasis › default neutral. Any
+  // earlier branch wins so a finished assignment stays green even if its
+  // due-date passed before completion.
   const cardTone = isCompleted
     ? 'border-emerald-200/70 bg-emerald-50/55 dark:border-emerald-900/50 dark:bg-emerald-950/20'
     : isOverdue
@@ -224,6 +242,10 @@ export default function AssignmentCard({
     cancelEdit();
   }
 
+  // Whole-assignment toggle (the big circle on the card). Always emits a
+  // toast — completion gets a "great work" tone, reopen gets a calmer info
+  // tone. The actual subtask flip happens in PlannerContext via the
+  // injected `onToggleAssignmentComplete` callback.
   function handleToggleAssignment() {
     if (!onToggleAssignmentComplete) return;
     onToggleAssignmentComplete(assignment.id);

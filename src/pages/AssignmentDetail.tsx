@@ -50,6 +50,10 @@ export default function AssignmentDetail() {
   const { showToast } = useToast();
   const assignment = getAssignmentById(id);
 
+  // Editable form state. Initialised from the loaded assignment, then kept
+  // in sync via the effect below whenever the route id changes. Date strings
+  // are stored as `yyyy-MM-dd` so the native date input renders them
+  // unchanged.
   const [title, setTitle] = useState(assignment?.title ?? "");
   const [subjectId, setSubjectId] = useState(assignment?.subjectId ?? "");
   const [dueDate, setDueDate] = useState(
@@ -61,6 +65,10 @@ export default function AssignmentDetail() {
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
 
+  // Re-seed the form fields only when the user actually navigates to a
+  // different assignment. Deliberately *not* depending on `assignments`
+  // because subtask toggles inside the embedded AssignmentCard would
+  // otherwise blow away any unsaved edits the user has in flight.
   useEffect(() => {
     const next = assignments.find((a) => a.id === id);
     if (!next) return;
@@ -69,10 +77,14 @@ export default function AssignmentDetail() {
     setDueDate(new Date(next.dueDate).toISOString().slice(0, 10));
     setPriority(next.priority);
     setNotes(next.notes ?? "");
-    // Re-seed only when the route id changes; omit `assignments` so subtask/progress updates do not reset the form.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
+  // Field-level validation. We only surface error copy after the user has
+  // attempted a submit (`showErrors`) so a freshly opened form doesn't shout
+  // before the student has typed anything. `duplicateTitleError` is the
+  // exception — it always renders because it represents a hard-to-discover
+  // collision that's better caught before submit.
   const titleError = showErrors && isBlank(title) ? "Title is required." : undefined;
   const subjectError = showErrors && !subjectId ? "Select a subject." : undefined;
   const dueError =
@@ -100,6 +112,9 @@ export default function AssignmentDetail() {
       ? "This due date is in the past. It may show as overdue until you complete the work."
       : undefined;
 
+  // Auto-clear the inline "Changes saved." confirmation after 2.8 s. The
+  // toast system isn't used here because this confirmation is anchored to
+  // the form (so it's visible while the user is still scanning the fields).
   useEffect(() => {
     if (!saveMessage) return;
     const t = window.setTimeout(() => setSaveMessage(null), 2800);
@@ -158,6 +173,10 @@ export default function AssignmentDetail() {
           }`}
           onSubmit={(event) => {
             event.preventDefault();
+            // Flip showErrors first so any failing fields highlight even if
+            // we bail out below. Date is fixed to 12:00 local before
+            // serialising so a yyyy-MM-dd input never drifts a day in
+            // timezones west of UTC.
             setShowErrors(true);
             if (!assignmentValid) return;
             updateAssignment(id, {
@@ -292,6 +311,9 @@ export default function AssignmentDetail() {
         cancelLabel="Cancel"
         onCancel={() => setDeleteDialogOpen(false)}
         onConfirm={() => {
+          // Snapshot before delete so undo can restore the full graph
+          // (subtasks + progress + notes), then navigate away. The undo
+          // toast deep-links back into this same detail page on restore.
           setDeleteDialogOpen(false);
           const copy = structuredClone(assignment);
           deleteAssignment(id);

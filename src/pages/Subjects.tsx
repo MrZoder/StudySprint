@@ -49,6 +49,9 @@ export default function Subjects() {
   const [showErrors, setShowErrors] = useState(false);
   const [formSuccess, setFormSuccess] = useState<string | null>(null);
 
+  // Cache `subjectId -> assignment count` once per assignments change so
+  // every row + the delete dialog can read it in O(1) instead of scanning
+  // the assignment list per render.
   const assignmentCountBySubject = useMemo(() => {
     return assignments.reduce<Record<string, number>>((acc, assignment) => {
       acc[assignment.subjectId] = (acc[assignment.subjectId] ?? 0) + 1;
@@ -85,6 +88,12 @@ export default function Subjects() {
             : `Deleting “${s.name}” (${s.code}) will remove this subject. This cannot be undone.`;
         })();
 
+  /**
+   * Wipe the form back to a "new subject" state. Used on cancel-edit and
+   * after a successful save so the next entry starts clean. Kept as a
+   * regular function (not a useCallback) because it isn't passed to
+   * memoised children.
+   */
   function resetSubjectForm() {
     setEditingId(null);
     setName('');
@@ -118,6 +127,11 @@ export default function Subjects() {
           )}
           onSubmit={(event) => {
             event.preventDefault();
+            // Form behaves as one component for both create and edit:
+            // `editingId` decides which planner action to call, otherwise
+            // the validation, payload normalisation, and reset flow are
+            // identical. Code is uppercased here so duplicate detection
+            // and rendering stay case-insensitive.
             setShowErrors(true);
             if (!canSubmit) return;
             if (editingId) {
