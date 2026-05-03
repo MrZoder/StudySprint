@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="64" y2="64" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#3B82F6"/>
+      <stop offset="1" stop-color="#0E7490"/>
+    </linearGradient>
+    <linearGradient id="bookHi" x1="8" y1="20" x2="56" y2="48" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFFFFF"/>
+      <stop offset="1" stop-color="#E0F2FE"/>
+    </linearGradient>
+    <linearGradient id="bolt" x1="28" y1="14" x2="44" y2="50" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FDE68A"/>
+      <stop offset="1" stop-color="#F59E0B"/>
+    </linearGradient>
+  </defs>
+
+  <rect x="0" y="0" width="64" height="64" rx="14" fill="url(#bg)"/>
+
+  <path d="M32 22
+           C 27 18, 18 17, 12 19
+           L 12 46
+           C 18 44, 27 45, 32 49
+           C 37 45, 46 44, 52 46
+           L 52 19
+           C 46 17, 37 18, 32 22 Z"
+        fill="url(#bookHi)"
+        stroke="rgba(15,23,42,0.12)" stroke-width="0.75" stroke-linejoin="round"/>
+
+  <path d="M32 22 L 32 49"
+        stroke="rgba(15,23,42,0.18)" stroke-width="1.25" stroke-linecap="round"/>
+
+  <path d="M36 16 L 25 36 L 32 36 L 28 50 L 43 30 L 35 30 Z"
+        fill="url(#bolt)"
+        stroke="rgba(120,53,15,0.35)" stroke-width="0.6" stroke-linejoin="round"/>
+</svg>
